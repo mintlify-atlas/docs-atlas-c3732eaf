@@ -1,0 +1,153 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "Lrnnx",
+  "projectDescription": "A unified PyTorch library providing state-of-the-art Linear RNN architectures for sequence modeling",
+  "theme": "aspen",
+  "primaryColor": "#5d6c75",
+  "lightColor": "#b5bec1",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/linear-rnns",
+              "concepts/lti-vs-ltv",
+              "concepts/discretization"
+            ]
+          },
+          {
+            "group": "Models",
+            "pages": [
+              "models/overview",
+              "models/lti/s4",
+              "models/lti/s4d",
+              "models/lti/s5",
+              "models/lti/lru",
+              "models/lti/centaurus",
+              "models/ltv/mamba",
+              "models/ltv/rglru",
+              "models/ltv/s7"
+            ]
+          },
+          {
+            "group": "Architectures",
+            "pages": [
+              "architectures/language-model",
+              "architectures/unet",
+              "architectures/classifier"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/training",
+              "guides/inference",
+              "guides/custom-kernels"
+            ]
+          },
+          {
+            "group": "Tutorials",
+            "pages": [
+              "tutorials/unet-denoising",
+              "tutorials/hierarchical-classification"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "LTI Models",
+            "pages": [
+              "api/lti/base",
+              "api/lti/s4",
+              "api/lti/s4d",
+              "api/lti/s5",
+              "api/lti/lru",
+              "api/lti/centaurus"
+            ]
+          },
+          {
+            "group": "LTV Models",
+            "pages": [
+              "api/ltv/base",
+              "api/ltv/mamba",
+              "api/ltv/rglru",
+              "api/ltv/s7"
+            ]
+          },
+          {
+            "group": "Core",
+            "pages": [
+              "api/core/base",
+              "api/core/discretization",
+              "api/core/convolution"
+            ]
+          },
+          {
+            "group": "Architectures",
+            "pages": [
+              "api/architectures/language-model",
+              "api/architectures/unet",
+              "api/architectures/classifier",
+              "api/architectures/embedding"
+            ]
+          },
+          {
+            "group": "Layers",
+            "pages": [
+              "api/layers/block",
+              "api/layers/mha",
+              "api/layers/mlp"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "api/ops/selective-scan",
+              "api/ops/simplified-scan",
+              "api/ops/s4-kernel"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Unified implementations of 10+ Linear RNN architectures (S4, S5, LRU, Mamba, etc.)",
+    "Custom CUDA kernels for optimized training and inference performance",
+    "Multiple API levels: scan operations, recurrent steps, and full layer implementations",
+    "Support for both Linear Time-Invariant (LTI) and Linear Time-Varying (LTV) models",
+    "Pre-built architectures for language modeling, U-Net, and hierarchical classification",
+    "CUDA graphs-based inference with 10x speedup over naive implementations"
+  ],
+  "publicApiSurface": [
+    "lrnnx.models.lti.S4",
+    "lrnnx.models.lti.S4D",
+    "lrnnx.models.lti.S5",
+    "lrnnx.models.lti.LRU",
+    "lrnnx.models.lti.Centaurus",
+    "lrnnx.models.ltv.Mamba",
+    "lrnnx.models.ltv.RGLRU",
+    "lrnnx.models.ltv.S7",
+    "lrnnx.architectures.language_model.LRNNLMHeadModel",
+    "lrnnx.architectures.lru_unet.LRU_UNet",
+    "lrnnx.architectures.classifier.HierarchicalClassifier",
+    "lrnnx.ops.selective_scan.selective_scan_fn",
+    "lrnnx.ops.simplified_scan.simplified_scan_fn",
+    "lrnnx.core.discretization.DISCRETIZE_FNS"
+  ]
+}
