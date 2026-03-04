@@ -1,0 +1,87 @@
+---
+title: LRNN Base Class
+description: Base model class for LRNN with abstract forward method and discretization support
+---
+
+## LRNN
+
+Base class for all LRNN (Linear Recurrent Neural Network) models. This abstract class provides the foundation for both LTI (Linear Time-Invariant) and LTV (Linear Time-Varying) LRNN implementations.
+
+### Class Hierarchy
+
+The `LRNN` class serves as the parent class for:
+- `LTI_LRNN` - Linear Time-Invariant LRNN models
+- `LTV_LRNN` - Linear Time-Varying LRNN models
+
+### Constructor
+
+```python
+LRNN(discretization)
+```
+
+Initialize the base LRNN model with a specified discretization method.
+
+<ParamField path="discretization" type="Literal['zoh', 'bilinear', 'dirac', 'async', 'no_discretization'] | None">
+  Discretization method to use for converting continuous-time systems to discrete-time:
+  - `"zoh"` - Zero-Order Hold discretization
+  - `"bilinear"` - Bilinear transform method (used in S4)
+  - `"dirac"` - Dirac discretization method
+  - `"async"` - Asynchronous discretization for event-driven models
+  - `"no_discretization"` - Identity operation, no discretization applied
+  - `None` - For models that handle discretization internally
+</ParamField>
+
+### Abstract Methods
+
+#### forward
+
+```python
+forward(x, integration_timesteps=None, lengths=None) -> Tensor
+```
+
+Forward pass through the LRNN. This method must be implemented by all subclasses.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input tensor, ideally of shape `(B, L, H)` where:
+  - `B` is the batch size
+  - `L` is the sequence length
+  - `H` is the hidden dimension
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor">
+  Timesteps for async/event-driven discretization (see [arxiv:2404.18508](https://arxiv.org/abs/2404.18508)), ideally of shape `(B, L)`. Only applicable for LTV models; LTI models ignore this parameter.
+</ParamField>
+
+<ParamField path="lengths" type="torch.Tensor">
+  Lengths of sequences, ideally of shape `(B,)`. Required for bidirectional models to properly handle variable-length sequences.
+</ParamField>
+
+<ResponseField name="output" type="torch.Tensor">
+  Output tensor with the same shape as input `x`, ideally `(B, L, H)`.
+</ResponseField>
+
+### Attributes
+
+<ResponseField name="discretize_fn" type="Callable | None">
+  The discretization function selected based on the `discretization` parameter. Set to `None` if no discretization method is specified.
+</ResponseField>
+
+### Example Usage
+
+```python
+from lrnnx.core import LRNN
+
+# Note: LRNN is abstract and cannot be instantiated directly
+# Create a subclass instance with ZOH discretization
+class MyLRNN(LRNN):
+    def forward(self, x, integration_timesteps=None, lengths=None):
+        # Implementation here
+        pass
+
+my_lrnn = MyLRNN("zoh")
+```
+
+### See Also
+
+- [Discretization Functions](/api/core/discretization) - Available discretization methods
+- [DISCRETIZE_FNS Dictionary](/api/core/discretization#discretize_fns) - Mapping of discretization method names to functions

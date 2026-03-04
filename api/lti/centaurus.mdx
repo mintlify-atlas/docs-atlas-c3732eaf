@@ -1,0 +1,491 @@
+---
+title: "Centaurus"
+description: "Multi-mode State Space model with intra-state mixing"
+icon: "sparkles"
+---
+
+## Overview
+
+`Centaurus` is a flexible State Space Model architecture that supports multiple modes of operation with different projection strategies. It uses intra-state mode mixing with sub-states to achieve convolutional-like expressiveness while maintaining the efficiency of SSMs.
+
+Centaurus provides four variants:
+- **CentaurusNeck**: Bottleneck with dense projections
+- **CentaurusDWS**: Depthwise-separable (one state per channel)
+- **CentaurusFull**: Fully connected (state per input-output pair)
+- **CentaurusPWNeck**: Pointwise bottleneck (flattened SISO lanes)
+
+## Import
+
+```python
+from lrnnx.models.lti import Centaurus, CentaurusNeck, CentaurusDWS, CentaurusFull, CentaurusPWNeck
+```
+
+## Class Signatures
+
+### Centaurus (Wrapper)
+
+```python
+class Centaurus
+```
+
+Backwards-compatible wrapper that returns a mode-specific class instance.
+
+### Concrete Classes
+
+```python
+class CentaurusNeck(CentaurusBase)   # Bottleneck mode
+class CentaurusDWS(CentaurusBase)    # Depthwise-separable mode
+class CentaurusFull(CentaurusBase)   # Fully connected mode
+class CentaurusPWNeck(CentaurusBase) # Pointwise mode
+```
+
+All inherit from: `CentaurusBase(LTI_LRNN, ABC)`
+
+## Constructor
+
+### Centaurus Wrapper
+
+```python
+Centaurus(
+    d_model: int,
+    d_state: int,
+    sub_state_dim: int,
+    discretization: Literal["zoh", "bilinear", "dirac", "async"] = "zoh",
+    mode: Literal["neck", "pointwise", "pw", "s5", "dws", "full"] = "neck",
+    **kwargs
+)
+```
+
+### Direct Instantiation
+
+```python
+CentaurusNeck(
+    d_model: int,
+    d_state: int,
+    sub_state_dim: int,
+    discretization: Literal["zoh", "bilinear", "dirac", "async"] = "zoh"
+)
+```
+
+(Same signature for `CentaurusDWS`, `CentaurusFull`, `CentaurusPWNeck`)
+
+### Parameters
+
+<ParamField path="d_model" type="int" required>
+  Model dimension (number of channels/features).
+</ParamField>
+
+<ParamField path="d_state" type="int" required>
+  State dimension (number of state channels, N in the paper).
+</ParamField>
+
+<ParamField path="sub_state_dim" type="int" required>
+  Sub-state dimension (M in the paper). Each of the N state channels has M sub-states for intra-channel mixing.
+</ParamField>
+
+<ParamField path="discretization" type="Literal['zoh', 'bilinear', 'dirac', 'async']" default="zoh">
+  Discretization method. Note: Currently only `"zoh"` is fully supported.
+</ParamField>
+
+<ParamField path="mode" type="Literal['neck', 'pointwise', 'pw', 's5', 'dws', 'full']" default="neck">
+  The Centaurus mode to instantiate (only for wrapper):
+  - `"neck"`: Bottleneck mode with dense projections
+  - `"pointwise"` / `"pw"` / `"s5"`: Pointwise mode (flattened SISO lanes)
+  - `"dws"`: Depthwise-separable mode
+  - `"full"`: Fully connected mode
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional arguments (reserved for future extensions).
+</ParamField>
+
+## Methods
+
+### forward
+
+```python
+def forward(
+    x: Tensor,
+    integration_timesteps: Optional[Tensor] = None,
+    lengths: Optional[Tensor] = None
+) -> Tensor
+```
+
+Forward pass through the Centaurus model.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input sequence of shape `(B, L, H_in)` where:
+  - B = batch size
+  - L = sequence length  
+  - H_in = input dimension (typically equals `d_model`)
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor" default={null}>
+  Placeholder for async models. Not used in the current implementation.
+</ParamField>
+
+<ParamField path="lengths" type="torch.Tensor" default={null}>
+  Placeholder for bidirectional models. Not used in the current implementation.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Output sequence of shape `(B, L, H_out)` where `H_out` is the output channel dimension (typically equals `d_model`).
+</ResponseField>
+
+---
+
+### step
+
+```python
+def step(
+    x: torch.Tensor,
+    inference_cache: Dict[str, Any],
+    **kwargs
+) -> tuple[torch.Tensor, Dict[str, Any]]
+```
+
+Single-timestep autoregressive update.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input at current timestep, shape `(B, H_in)`.
+</ParamField>
+
+<ParamField path="inference_cache" type="Dict[str, Any]" required>
+  Cache from `allocate_inference_cache()` containing:
+  - `"lrnn_state"`: Current recurrent state (shape varies by mode)
+  - Pre-computed discrete-time matrices (A_bar, B_bar, C, E)
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments.
+</ParamField>
+
+<ResponseField name="return" type="tuple[torch.Tensor, Dict[str, Any]]">
+  A tuple containing:
+  - **y**: Output at current timestep, shape `(B, H_out)` (real-valued)
+  - **inference_cache**: Updated cache dictionary with new state
+</ResponseField>
+
+---
+
+### allocate_inference_cache
+
+```python
+def allocate_inference_cache(
+    batch_size: int,
+    max_seqlen: int = 1,
+    **kwargs
+) -> Dict[str, Any]
+```
+
+Allocate initial streaming state and cache matrices.
+
+<ParamField path="batch_size" type="int" required>
+  Batch size for inference.
+</ParamField>
+
+<ParamField path="max_seqlen" type="int" default={1}>
+  Maximum sequence length (unused, kept for interface consistency).
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments.
+</ParamField>
+
+<ResponseField name="return" type="Dict[str, Any]">
+  Cache dictionary with:
+  - `"lrnn_state"`: Zero-initialized complex state
+    - CentaurusNeck/DWS/Full: shape `(B, N, M)` where N=d_state, M=sub_state_dim
+    - CentaurusPWNeck: shape `(B, N*M)` (flattened)
+  - Pre-computed discrete parameters (A_bar, B_bar, C, E)
+</ResponseField>
+
+---
+
+### compute_kernel
+
+```python
+def compute_kernel() -> tuple[Tensor, Tensor]
+```
+
+Computes the discrete-time latent convolution kernel with intra-state mode mixing.
+
+<ResponseField name="return" type="tuple[torch.Tensor, torch.Tensor]">
+  A tuple containing:
+  - **K**: Latent kernel of shape `(N, L)` for most modes, or `(N*M, L)` for CentaurusPWNeck
+  - **empty**: Placeholder tensor (empty) for interface compatibility
+</ResponseField>
+
+---
+
+### discretize
+
+```python
+def discretize() -> tuple[Tensor, Tensor, Tensor]
+```
+
+<Warning>
+This method is not implemented for Centaurus variants. Centaurus performs implicit ZOH discretization in its kernel computation and forward methods.
+</Warning>
+
+Raises `NotImplementedError` if called.
+
+## Example Usage
+
+### Basic Usage with Wrapper
+
+```python
+from lrnnx.models.lti import Centaurus
+import torch
+
+# Create Centaurus model (neck mode)
+model = Centaurus(
+    d_model=64,
+    d_state=64,
+    sub_state_dim=8,
+    mode="neck"
+)
+
+# Training: parallel mode
+x = torch.randn(2, 128, 64)  # (batch, length, features)
+y = model(x)
+print(y.shape)  # torch.Size([2, 128, 64])
+```
+
+### Direct Instantiation
+
+```python
+from lrnnx.models.lti import CentaurusNeck
+
+model = CentaurusNeck(
+    d_model=64,
+    d_state=64,
+    sub_state_dim=8,
+    discretization="zoh"
+)
+```
+
+### Different Modes
+
+```python
+# Bottleneck mode (neck)
+model_neck = Centaurus(d_model=64, d_state=32, sub_state_dim=8, mode="neck")
+
+# Depthwise-separable mode (dws)
+model_dws = Centaurus(d_model=64, d_state=64, sub_state_dim=8, mode="dws")
+
+# Fully connected mode (full)
+model_full = Centaurus(d_model=64, d_state=4096, sub_state_dim=8, mode="full")
+
+# Pointwise bottleneck mode (pw/s5)
+model_pw = Centaurus(d_model=64, d_state=64, sub_state_dim=8, mode="pointwise")
+```
+
+### Autoregressive Inference
+
+```python
+# Allocate cache
+cache = model.allocate_inference_cache(batch_size=2)
+
+# Generate sequence
+outputs = []
+for t in range(100):
+    x_t = torch.randn(2, 64)  # (batch, features)
+    y_t, cache = model.step(x_t, cache)
+    outputs.append(y_t)
+
+y_seq = torch.stack(outputs, dim=1)  # (batch, length, features)
+```
+
+## Mode Variants
+
+### CentaurusNeck ("neck")
+
+**Bottleneck with dense projections.**
+
+- **State**: `(N, M)` where `N < H` (bottleneck)
+- **B matrix**: Dense `(N, H)` - projects all input channels to N states
+- **C matrix**: Dense `(H, N)` - projects N states to all output channels
+- **Use case**: Efficient bottleneck similar to 1x1 convolution
+
+```python
+model = CentaurusNeck(d_model=256, d_state=64, sub_state_dim=8)
+# 256 channels → 64 states → 256 channels
+```
+
+---
+
+### CentaurusDWS ("dws")
+
+**Depthwise-separable with one state per channel.**
+
+- **State**: `(H, M)` where `N = H`
+- **B matrix**: Diagonal `(H, H)` - each channel has its own scalar weight
+- **C matrix**: Diagonal `(H, H)` - each state maps to one output channel
+- **Use case**: Depthwise convolution analog, parameter-efficient
+
+```python
+model = CentaurusDWS(d_model=256, d_state=256, sub_state_dim=8)
+# Each of 256 channels has independent state dynamics
+```
+
+---
+
+### CentaurusFull ("full")
+
+**Fully connected with state per input-output pair.**
+
+- **State**: `(H²,  M)` where `N = H²`
+- **B matrix**: Sparse `(H², H)` - each (input, output) pair has one state
+- **C matrix**: Sparse `(H, H²)` - gather outputs from paired states
+- **Use case**: Maximum expressiveness, like full convolution kernel
+
+```python
+model = CentaurusFull(d_model=32, d_state=1024, sub_state_dim=8)
+# 32² = 1024 states for full channel mixing
+```
+
+<Warning>
+Full mode has `O(H²)` states and is memory-intensive for large `d_model`.
+</Warning>
+
+---
+
+### CentaurusPWNeck ("pointwise", "pw", "s5")
+
+**Pointwise bottleneck with flattened SISO lanes.**
+
+- **State**: Flattened `(N*M,)` - removes E-mixing
+- **B matrix**: Dense `(N*M, H)`
+- **C matrix**: Dense `(H, N*M)`
+- **Difference from Neck**: No E-mixing; each sub-state is independent
+- **Use case**: Simpler variant, similar to S5 architecture
+
+```python
+model = CentaurusPWNeck(d_model=256, d_state=64, sub_state_dim=8)
+# 64 * 8 = 512 independent SISO lanes
+```
+
+## Architecture Details
+
+### Intra-State Mixing
+
+Centaurus uses sub-states for each state channel:
+
+```python
+A: (N, M)  # N state channels, M sub-states each
+E: (N, M)  # Mixing weights (except in PWNeck mode)
+```
+
+The key innovation:
+
+```
+1. Evolve sub-states independently: A_bar = exp(delta * A)
+2. Mix sub-states per channel: mixed[n] = Σ_m (state[n,m] * E[n,m])
+3. Project to output channels: y = C @ mixed
+```
+
+This allows **convolutional expressiveness** while keeping computation efficient.
+
+### System Matrices
+
+| Matrix | Shape | Description |
+|--------|-------|-------------|
+| A | `(N, M)` | Complex sub-state dynamics (per channel) |
+| E | `(N, M)` | Sub-state mixing weights (real) |
+| log_delta | `(N,)` | Learnable time steps per state channel |
+| B | Mode-specific | Input projection (see mode variants) |
+| C | Mode-specific | Output projection (see mode variants) |
+
+### Initialization
+
+```python
+# A matrix: complex with log-spaced imaginary frequencies
+m = arange(M)
+A[n,m] = -0.5 + 1j * m * π / M  (for all n)
+
+# E matrix: random normal * sqrt(2)
+E ~ Normal(0, sqrt(2))
+
+# Delta: log-spaced from 0.001 to 0.1
+log_delta = log(logspace(-3, -1, N))
+
+# B, C: mode-specific (Kaiming initialization)
+```
+
+### Recurrent Update (Non-PWNeck)
+
+```python
+# Input projection to states
+u_bn = B_bar @ x_t  # (B, N)
+
+# Sub-state evolution
+state_{t+1} = A_bar * state_t + u_bn[:, :, None]  # (B, N, M)
+
+# Mix sub-states (real part)
+mixed = Σ_m state_{t+1}[:, n, m].real * E[n, m]  # (B, N)
+
+# Output projection
+y_t = C @ mixed  # (B, H)
+```
+
+### Recurrent Update (PWNeck)
+
+```python
+# Flattened: no E-mixing
+u = B_bar_flat @ x_t  # (B, N*M)
+
+state_{t+1} = A_bar_flat * state_t + u  # (B, N*M)
+
+y_t = C_flat @ state_{t+1}.real  # (B, H)
+```
+
+## Performance Notes
+
+- **Flexible**: Multiple modes for different parameter/expressiveness trade-offs
+- **Efficient**: Sub-state mixing provides conv-like expressiveness without full materialization
+- **Parallel training**: FFT-based convolution in forward pass
+- **Fast inference**: Pre-computed discrete matrices
+- **Complex states**: Uses `complex64` (2x memory vs float32 per element)
+
+## Mode Comparison
+
+| Mode | Parameters | Expressiveness | Memory | Use Case |
+|------|------------|----------------|--------|----------|
+| **Neck** | `O(N*H)` | Medium | Low | Bottleneck layers |
+| **DWS** | `O(H)` | Low | Very Low | Depthwise mixing |
+| **Full** | `O(H²)` | Highest | High | Full mixing |
+| **PWNeck** | `O(N*M*H)` | Medium | Medium | Simple bottleneck |
+
+Where:
+- N = `d_state`
+- M = `sub_state_dim`
+- H = `d_model`
+
+## When to Use Centaurus
+
+Choose Centaurus when:
+- You want conv-like expressiveness in an SSM
+- You need flexible parameter/expressiveness trade-offs
+- You want to experiment with different projection strategies
+- You're building hybrid CNN-SSM architectures
+
+Choose specific modes:
+- **Neck**: Default choice, good balance
+- **DWS**: Parameter-efficient, fast
+- **Full**: Maximum expressiveness, smaller `d_model`
+- **PWNeck**: Simplest, similar to S5
+
+## Notes
+
+- Centaurus currently only fully supports `discretization="zoh"`
+- The wrapper maps mode aliases: `"pw"`, `"s5"` → `CentaurusPWNeck`
+- Sub-state dimension M controls intra-channel mixing resolution
+- Full mode should be used carefully due to `O(H²)` state dimension
+
+## See Also
+
+- [LTI_LRNN Base Class](/api/lti/base) - Base class documentation
+- [S5 API Reference](/api/lti/s5) - Similar architecture (CentaurusPWNeck is related)
+- [LTI Concepts](/concepts/lti) - Understanding LTI models
+- [Centaurus Paper](https://openreview.net/forum?id=PkpNRmBZ32)

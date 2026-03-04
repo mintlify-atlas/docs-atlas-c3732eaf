@@ -1,0 +1,405 @@
+---
+title: "LRU"
+description: "Linear Recurrent Unit with learned complex diagonal dynamics"
+icon: "arrow-progress"
+---
+
+## Overview
+
+`LRU` (Linear Recurrent Unit) is a simplified state space model that learns complex diagonal dynamics directly without explicit discretization. It uses learnable complex eigenvalues parameterized in the polar form (radius and phase), making it both simple and effective.
+
+LRU uses FFT-based convolution for parallel training and supports efficient autoregressive inference.
+
+## Import
+
+```python
+from lrnnx.models.lti import LRU
+```
+
+## Class Signature
+
+```python
+class LRU(LTI_LRNN)
+```
+
+Inherits from: [`LTI_LRNN`](/api/lti/base)
+
+## Constructor
+
+```python
+LRU(
+    d_model: int,
+    d_state: int,
+    r_min: float = 0,
+    r_max: float = 1,
+    max_phase: float = 2 * math.pi
+)
+```
+
+### Parameters
+
+<ParamField path="d_model" type="int" required>
+  Model dimension (hidden size / number of features).
+</ParamField>
+
+<ParamField path="d_state" type="int" required>
+  State dimension (internal SSM state size).
+</ParamField>
+
+<ParamField path="r_min" type="float" default={0}>
+  Minimum radius for Lambda (eigenvalue) initialization. Eigenvalues are initialized uniformly on an annulus between `r_min` and `r_max`.
+</ParamField>
+
+<ParamField path="r_max" type="float" default={1}>
+  Maximum radius for Lambda (eigenvalue) initialization. Setting `r_max=1` constrains eigenvalues to have magnitude ≤ 1, ensuring stability.
+</ParamField>
+
+<ParamField path="max_phase" type="float" default={"2 * math.pi"}>
+  Maximum phase for Lambda initialization. Phases are initialized uniformly between 0 and `max_phase`.
+</ParamField>
+
+## Methods
+
+### forward
+
+```python
+def forward(
+    x: Tensor,
+    integration_timesteps: Optional[Tensor] = None,
+    lengths: Optional[Tensor] = None
+) -> Tensor
+```
+
+Forward pass of the LRU layer using FFT-based convolution.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input tensor of shape `(B, L, H)` where:
+  - B = batch size
+  - L = sequence length
+  - H = model dimension (`d_model`)
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor" default={null}>
+  Not currently implemented. Reserved for future use.
+</ParamField>
+
+<ParamField path="lengths" type="torch.Tensor" default={null}>
+  Not currently implemented. Reserved for future use.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Output tensor of shape `(B, L, H)`.
+</ResponseField>
+
+---
+
+### step
+
+```python
+def step(
+    x: Tensor,
+    inference_cache: Dict[str, Any],
+    **kwargs
+) -> tuple[Tensor, Dict[str, Any]]
+```
+
+Single step inference for autoregressive generation.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input tensor at current timestep, shape `(B, H)`.
+</ParamField>
+
+<ParamField path="inference_cache" type="Dict[str, Any]" required>
+  Cache from `allocate_inference_cache()` containing:
+  - `"lrnn_state"`: Current recurrent state
+  - `"Lambda"`: Pre-computed complex eigenvalues
+  - `"B_norm"`: Pre-computed normalized B matrix
+  - `"C_complex"`: Pre-computed complex C matrix
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments.
+</ParamField>
+
+<ResponseField name="return" type="tuple[torch.Tensor, Dict[str, Any]]">
+  A tuple containing:
+  - **y**: Output at current timestep, shape `(B, H)`
+  - **inference_cache**: Updated cache dictionary with new state
+</ResponseField>
+
+---
+
+### allocate_inference_cache
+
+```python
+def allocate_inference_cache(
+    batch_size: int,
+    max_seqlen: int = 1,
+    dtype: Optional[torch.dtype] = None,
+    **kwargs
+) -> Dict[str, Any]
+```
+
+Allocate initial state and cached matrices for inference.
+
+<ParamField path="batch_size" type="int" required>
+  Batch size for inference.
+</ParamField>
+
+<ParamField path="max_seqlen" type="int" default={1}>
+  Maximum sequence length (unused for LTI, kept for interface consistency).
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype" default={null}>
+  Data type for allocated tensors (unused, model uses its own dtype).
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional model-specific arguments.
+</ParamField>
+
+<ResponseField name="return" type="Dict[str, Any]">
+  Cache dictionary containing:
+  - `"lrnn_state"`: Zero-initialized state, shape `(B, d_state)`, dtype `complex64`
+  - `"Lambda"`: Complex eigenvalues, shape `(d_state,)`
+  - `"B_norm"`: Normalized B matrix, shape `(d_state, d_model)`
+  - `"C_complex"`: Complex C matrix, shape `(d_model, d_state)`
+</ResponseField>
+
+---
+
+### discretize
+
+```python
+def discretize() -> tuple[Tensor, Tensor, Tensor]
+```
+
+LRU uses no explicit discretization, so this method acts as a parameter preparation step.
+
+<ResponseField name="return" type="tuple[Tensor, Tensor, Tensor]">
+  A tuple containing:
+  - **A**: Diagonal Lambda values, shape `(N,)` - complex eigenvalues
+  - **B**: Complex input projection matrix, shape `(N, H)`
+  - **C**: Complex output projection matrix, shape `(H, N)`
+</ResponseField>
+
+---
+
+### compute_kernel
+
+```python
+def compute_kernel(
+    L: int,
+    Lambda: Tensor,
+    B_complex: Tensor
+) -> tuple[Tensor, Tensor]
+```
+
+Compute convolution kernel for parallel training.
+
+<ParamField path="L" type="int" required>
+  Length of the input sequence.
+</ParamField>
+
+<ParamField path="Lambda" type="torch.Tensor" required>
+  Complex eigenvalues/diagonal elements, shape `(N,)`.
+</ParamField>
+
+<ParamField path="B_complex" type="torch.Tensor" required>
+  Complex input projection matrix, shape `(N, H)`.
+</ParamField>
+
+<ResponseField name="return" type="tuple[torch.Tensor, torch.Tensor]">
+  A tuple containing:
+  - **K**: Convolution kernel with Lambda powers, shape `(N, L)` - contains [Λ^0, Λ^1, ..., Λ^(L-1)]
+  - **B_norm**: Normalized input projection matrix (B * exp(gamma_log)), shape `(N, H)`
+</ResponseField>
+
+## Example Usage
+
+### Basic Usage
+
+```python
+from lrnnx.models.lti import LRU
+import torch
+
+# Create LRU model
+model = LRU(d_model=64, d_state=64)
+
+# Training: parallel mode
+x = torch.randn(2, 128, 64)  # (batch, length, features)
+y = model(x)
+print(y.shape)  # torch.Size([2, 128, 64])
+```
+
+### Autoregressive Inference
+
+```python
+# Allocate cache for inference
+cache = model.allocate_inference_cache(batch_size=2)
+
+# Generate sequence token by token
+outputs = []
+for t in range(100):
+    x_t = torch.randn(2, 64)  # (batch, features)
+    y_t, cache = model.step(x_t, cache)
+    outputs.append(y_t)
+
+# Stack outputs
+y_seq = torch.stack(outputs, dim=1)  # (batch, length, features)
+print(y_seq.shape)  # torch.Size([2, 100, 64])
+```
+
+### Custom Eigenvalue Initialization
+
+```python
+# Initialize with tighter radius range for more stable dynamics
+model = LRU(
+    d_model=128,
+    d_state=128,
+    r_min=0.9,     # Minimum radius close to 1
+    r_max=0.999,   # Maximum radius close to 1
+    max_phase=math.pi  # Restrict phase to [0, π]
+)
+```
+
+## Key Features
+
+### Learned Complex Dynamics
+
+LRU directly learns complex eigenvalues in polar form:
+
+```python
+Λ = exp(-exp(nu_log) + 1j * exp(theta_log))
+```
+
+where:
+- `nu_log`: Controls the radius (magnitude) of eigenvalues
+- `theta_log`: Controls the phase (angle) of eigenvalues
+
+This parameterization:
+- **Ensures stability**: Constraining radius to [0, 1] keeps eigenvalues in unit circle
+- **Learns time scales**: Different radii correspond to different decay rates
+- **Captures oscillations**: Phases enable modeling of oscillatory dynamics
+
+### No Explicit Discretization
+
+Unlike S4/S4D/S5, LRU does not use explicit discretization methods (ZOH, bilinear, etc.). Instead:
+- Eigenvalues Λ are learned directly in discrete-time form
+- The model learns appropriate time scales through `nu_log` and `theta_log`
+- A learnable normalization factor `gamma_log` scales the input projection
+
+### Normalization Factor
+
+LRU includes a learnable normalization:
+
+```python
+gamma = exp(gamma_log)
+B_normalized = B * gamma
+```
+
+The paper suggests `gamma` can also be computed as:
+```python
+gamma = sqrt(1 - |Λ|²)
+```
+which maintains signal energy, but making it learnable yields similar results.
+
+### System Matrices
+
+| Matrix | Shape | Dtype | Description |
+|--------|-------|-------|-------------|
+| nu_log | `(d_state,)` | float32 | Log of radial component |
+| theta_log | `(d_state,)` | float32 | Log of angular component |
+| B_re, B_im | `(d_state, d_model)` | float32 | Real and imaginary parts of B |
+| C_re, C_im | `(d_model, d_state)` | float32 | Real and imaginary parts of C |
+| D | `(d_model,)` | float32 | Skip connection |
+| gamma_log | `(d_state,)` | float32 | Log of normalization factor |
+
+## Architecture Details
+
+### Initialization
+
+```python
+# Eigenvalue parameters: uniform on annulus [r_min, r_max] × [0, max_phase]
+u1, u2 = rand(N), rand(N)
+nu_log = log(-0.5 * log(u1 * (r_max² - r_min²) + r_min²))
+theta_log = log(max_phase * u2)
+
+# Input/output projections: Glorot initialization
+B_re, B_im ~ Normal(0, 1/sqrt(2*d_model))
+C_re, C_im ~ Normal(0, 1/sqrt(d_state))
+
+# Skip connection
+D ~ Normal(0, 1)
+
+# Normalization factor
+Λ = exp(-exp(nu_log) + 1j * exp(theta_log))
+gamma_log = log(sqrt(1 - |Λ|²))
+```
+
+### Recurrent Update
+
+For autoregressive inference:
+
+```python
+# State update
+state_{t+1} = Λ * state_t + B_norm @ x_t
+
+# Output (take real part)
+y_t = Real(C_complex @ state_{t+1}) + D * x_t
+```
+
+### Training Forward Pass
+
+For parallel training:
+
+```python
+# Compute kernel: K[i] = Λ^i for i = 0, ..., L-1
+K = Λ^{0:L}
+
+# Convolve: Y = K ⊛ (B @ X) 
+y = FFT_conv(K, B_norm @ x) + D * x
+
+# Where ⊛ denotes convolution and @ is matrix multiplication
+```
+
+## Performance Notes
+
+- **Simple**: Fewer parameters and hyperparameters than S4/S4D
+- **No discretization overhead**: Learns dynamics directly in discrete time
+- **Fast training**: FFT-based parallel convolution
+- **Efficient inference**: Pre-computed matrices for autoregressive generation
+- **Stable**: Polar parameterization naturally constrains eigenvalues
+
+## Comparison with Other Models
+
+| Model | Discretization | State Matrix | Normalization | Complexity |
+|-------|----------------|--------------|---------------|------------|
+| S4 | Internal (DPLR) | Diagonal + Low-Rank | Implicit | High |
+| S4D | Via `disc` param | Diagonal | Implicit | Medium |
+| S5 | ZOH/Bilinear/Dirac | Complex Diagonal | Via dt | Medium |
+| **LRU** | **None (learned)** | **Complex Diagonal** | **Learnable γ** | **Low** |
+
+## When to Use LRU
+
+Choose LRU when:
+- You want the simplest possible SSM architecture
+- You prefer learned discretization over explicit methods
+- You need stable long-term dependencies (eigenvalues in unit circle)
+- You want minimal hyperparameter tuning
+- Your task benefits from learning time scales end-to-end
+
+## Notes
+
+- LRU uses `discretization="no_discretization"` as it doesn't use explicit discretization
+- The polar parameterization (radius, phase) naturally ensures eigenvalue stability
+- Setting `r_max=1` constrains eigenvalues to unit circle, guaranteeing bounded dynamics
+- The skip connection D is per-feature, not a full matrix (unlike S5)
+
+## See Also
+
+- [S5 API Reference](/api/lti/s5) - Similar architecture with explicit discretization
+- [S4D API Reference](/api/lti/s4d) - Diagonal SSM with internal discretization
+- [LTI_LRNN Base Class](/api/lti/base) - Base class documentation
+- [LTI Concepts](/concepts/lti) - Understanding LTI models
+- [LRU Paper](https://arxiv.org/abs/2303.06349)

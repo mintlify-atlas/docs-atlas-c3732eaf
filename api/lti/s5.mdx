@@ -1,0 +1,365 @@
+---
+title: "S5"
+description: "Simplified State Space model with complex diagonal parameterization"
+icon: "5"
+---
+
+## Overview
+
+`S5` is a simplified state space model that further streamlines the S4 architecture. It uses a complex diagonal state matrix with learnable real and imaginary components, making it conceptually simpler while maintaining strong performance.
+
+S5 uses FFT-based convolution for parallel training and supports efficient autoregressive inference.
+
+## Import
+
+```python
+from lrnnx.models.lti import S5
+```
+
+## Class Signature
+
+```python
+class S5(LTI_LRNN)
+```
+
+Inherits from: [`LTI_LRNN`](/api/lti/base)
+
+## Constructor
+
+```python
+S5(
+    d_model: int,
+    d_state: int,
+    discretization: Literal["zoh", "bilinear", "dirac", "no_discretization"],
+    conj_sym: bool = False
+)
+```
+
+### Parameters
+
+<ParamField path="d_model" type="int" required>
+  Model dimension (hidden size / number of features).
+</ParamField>
+
+<ParamField path="d_state" type="int" required>
+  State dimension (P in the original S5 paper). The internal SSM state size.
+</ParamField>
+
+<ParamField path="discretization" type="Literal['zoh', 'bilinear', 'dirac', 'no_discretization']" required>
+  Discretization method to use:
+  - `"zoh"`: Zero-order hold discretization
+  - `"bilinear"`: Bilinear transform (Tustin's method)
+  - `"dirac"`: Dirac/impulse discretization
+  - `"no_discretization"`: No explicit discretization
+</ParamField>
+
+<ParamField path="conj_sym" type="bool" default={false}>
+  If `True`, uses conjugate symmetry for the state space model. Currently not implemented - raises `NotImplementedError` if set to `True`.
+</ParamField>
+
+## Methods
+
+### forward
+
+```python
+def forward(
+    x: Tensor,
+    integration_timesteps: Optional[Tensor] = None,
+    lengths: Optional[Tensor] = None
+) -> Tensor
+```
+
+Forward pass of the S5 SSM using FFT-based convolution.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input tensor of shape `(B, L, H)` where:
+  - B = batch size
+  - L = sequence length
+  - H = model dimension (`d_model`)
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor" default={null}>
+  Not used by S5 (LTI model). Kept for interface compatibility with LTV models.
+</ParamField>
+
+<ParamField path="lengths" type="torch.Tensor" default={null}>
+  Lengths of the input sequences, shape `(B,)`. TODO: Support bidirectional models.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Output tensor of shape `(B, L, H)`.
+</ResponseField>
+
+---
+
+### step
+
+```python
+def step(
+    x: torch.Tensor,
+    inference_cache: Dict[str, Any],
+    **kwargs
+) -> tuple[torch.Tensor, Dict[str, Any]]
+```
+
+Performs a single recurrent step of the S5 model for autoregressive inference.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input at current timestep, shape `(B, H)`.
+</ParamField>
+
+<ParamField path="inference_cache" type="Dict[str, Any]" required>
+  Cache from `allocate_inference_cache()` containing:
+  - `"lrnn_state"`: Current recurrent state
+  - `"A_bar"`: Pre-computed discretized A matrix
+  - `"B_bar"`: Pre-computed discretized B matrix
+  - `"C_complex"`: Pre-computed complex C matrix
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments.
+</ParamField>
+
+<ResponseField name="return" type="tuple[torch.Tensor, Dict[str, Any]]">
+  A tuple containing:
+  - **y_t**: Output at current timestep, shape `(B, H)`
+  - **inference_cache**: Updated cache dictionary with new state
+</ResponseField>
+
+---
+
+### allocate_inference_cache
+
+```python
+def allocate_inference_cache(
+    batch_size: int,
+    max_seqlen: int = 1,
+    dtype: Optional[torch.dtype] = None,
+    **kwargs
+) -> Dict[str, Any]
+```
+
+Allocates cache for efficient inference by pre-computing discrete matrices.
+
+<ParamField path="batch_size" type="int" required>
+  The batch size for inference.
+</ParamField>
+
+<ParamField path="max_seqlen" type="int" default={1}>
+  Maximum sequence length (unused for LTI, kept for interface consistency with LTV models).
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype" default={null}>
+  Data type for allocated tensors (unused, uses model's dtype).
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional model-specific arguments.
+</ParamField>
+
+<ResponseField name="return" type="Dict[str, Any]">
+  Cache dictionary containing:
+  - `"lrnn_state"`: Zero-initialized state of shape `(B, d_state)`, dtype `complex64`
+  - `"A_bar"`: Discretized A matrix
+  - `"B_bar"`: Discretized B matrix  
+  - `"C_complex"`: Complex C matrix
+</ResponseField>
+
+---
+
+### discretize
+
+```python
+def discretize() -> tuple[torch.Tensor, Union[torch.Tensor, float], torch.Tensor]
+```
+
+Discretizes the continuous-time system matrices A and B using the specified discretization method.
+
+<ResponseField name="return" type="tuple[torch.Tensor, Union[torch.Tensor, float], torch.Tensor]">
+  A tuple containing:
+  - **A_bar**: Discretized system matrix A, shape `(N,)`, complex dtype
+  - **gamma_bar**: Input normalizer, shape `(N,)` or a float
+  - **C_complex**: Complex output matrix C, shape `(H, N)`
+</ResponseField>
+
+---
+
+### compute_kernel
+
+```python
+def compute_kernel(
+    L: int,
+    A_bar: Tensor,
+    gamma_bar: Union[Tensor, float]
+) -> tuple[Tensor, Tensor]
+```
+
+Computes the kernel matrices for the S5 model.
+
+<ParamField path="L" type="int" required>
+  Length of the input sequence.
+</ParamField>
+
+<ParamField path="A_bar" type="torch.Tensor" required>
+  Discretized system matrix A, shape `(N,)`.
+</ParamField>
+
+<ParamField path="gamma_bar" type="Union[torch.Tensor, float]" required>
+  Input normalizer, shape `(N,)` or a float.
+</ParamField>
+
+<ResponseField name="return" type="tuple[torch.Tensor, torch.Tensor]">
+  A tuple containing:
+  - **A_power**: Power of the discretized system matrix A, shape `(N, L)` - contains [A^0, A^1, ..., A^(L-1)]
+  - **B_bar**: Normalized input projection matrix, shape `(N, H)`
+</ResponseField>
+
+## Example Usage
+
+### Basic Usage
+
+```python
+from lrnnx.models.lti import S5
+import torch
+
+# Create S5 model
+model = S5(d_model=64, d_state=64, discretization="zoh")
+
+# Training: parallel mode
+x = torch.randn(2, 128, 64)  # (batch, length, features)
+y = model(x)
+print(y.shape)  # torch.Size([2, 128, 64])
+```
+
+### Autoregressive Inference
+
+```python
+# Allocate cache for inference
+cache = model.allocate_inference_cache(batch_size=2)
+
+# Generate sequence token by token
+outputs = []
+for t in range(100):
+    x_t = torch.randn(2, 64)  # (batch, features)
+    y_t, cache = model.step(x_t, cache)
+    outputs.append(y_t)
+
+# Stack outputs
+y_seq = torch.stack(outputs, dim=1)  # (batch, length, features)
+print(y_seq.shape)  # torch.Size([2, 100, 64])
+```
+
+### Different Discretization Methods
+
+```python
+# Zero-order hold (default)
+model_zoh = S5(d_model=128, d_state=128, discretization="zoh")
+
+# Bilinear transform
+model_bilinear = S5(d_model=128, d_state=128, discretization="bilinear")
+
+# Dirac discretization
+model_dirac = S5(d_model=128, d_state=128, discretization="dirac")
+```
+
+## Key Features
+
+### Simplified Architecture
+
+S5 simplifies S4 by:
+- **No low-rank corrections**: Pure diagonal state matrix (no P matrix)
+- **Explicit discretization**: Uses standard discretization methods
+- **Simpler initialization**: Log-spaced time scales, uniform B initialization
+- **Fewer hyperparameters**: Easier to configure and tune
+
+### Complex Diagonal State Matrix
+
+The state matrix A is parameterized as:
+
+```python
+A_complex = -softplus(log_A_real) + 1j * A_imag
+```
+
+where:
+- `log_A_real`: Learnable real part (stored in log-space for stability)
+- `A_imag`: Learnable imaginary part (π-spaced initialization)
+
+### Learnable Time Scales
+
+S5 learns different time scales for each state dimension:
+
+```python
+log_dt = log-spaced from 0.001 to 0.1
+```
+
+This allows the model to capture both fast and slow dynamics.
+
+### System Matrices
+
+| Matrix | Shape | Description |
+|--------|-------|-------------|
+| A | `(d_state, 2)` | Complex diagonal (stored as real, imag pairs) |
+| B | `(d_state, d_model)` | Input projection |
+| C | `(d_model, d_state, 2)` | Output weights (stored as real, imag pairs) |
+| D | `(d_model, d_model)` | Skip connection / feedthrough matrix |
+| log_dt | `(d_state,)` | Learnable time steps per state dimension |
+
+## Architecture Details
+
+### Initialization
+
+```python
+# A matrix: real part = 0.5, imaginary part = π-spaced
+A_real = 0.5 * ones(N)
+A_imag = π * arange(N)
+
+# Time steps: log-spaced
+log_dt = linspace(log(0.001), log(0.1), N)
+
+# B matrix: normalized uniform
+B = ones(N, H) / sqrt(H)
+
+# C matrix: Kaiming normal
+C ~ Normal(0, sqrt(2/N))
+
+# D matrix: Kaiming normal  
+D ~ Normal(0, sqrt(2/H))
+```
+
+### Recurrent Update
+
+For autoregressive inference:
+
+```python
+# State update
+state_{t+1} = A_bar * state_t + B_bar @ x_t
+
+# Output
+y_t = Real(C_complex @ state_{t+1}) + D @ x_t
+```
+
+## Performance Notes
+
+- **Simpler than S4/S4D**: Fewer parameters and hyperparameters
+- **Competitive performance**: Often matches S4 on many tasks
+- **Fast training**: FFT-based convolution for parallel sequences
+- **Efficient inference**: Pre-computed matrices for autoregressive generation
+- **Memory efficient**: Complex64 state (2x float32 per element)
+
+## Comparison with Other Models
+
+| Model | State Matrix | Discretization | Complexity |
+|-------|--------------|----------------|------------|
+| S4 | Diagonal + Low-Rank | Internal | High |
+| S4D | Diagonal | Via `disc` param | Medium |
+| **S5** | **Complex Diagonal** | **Explicit** | **Low** |
+| LRU | Complex Diagonal | None (learned) | Low |
+
+## See Also
+
+- [S4 API Reference](/api/lti/s4) - Full DPLR parameterization
+- [S4D API Reference](/api/lti/s4d) - Diagonal variant with internal discretization
+- [LRU API Reference](/api/lti/lru) - Similar architecture with learned discretization
+- [LTI_LRNN Base Class](/api/lti/base) - Base class documentation
+- [Discretization Methods](/concepts/discretization) - Understanding discretization
+- [S5 Paper](https://arxiv.org/abs/2208.04933)

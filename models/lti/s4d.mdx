@@ -1,0 +1,295 @@
+---
+title: S4D
+description: Diagonal variant of S4 with simplified parameterization
+---
+
+## Overview
+
+S4D (Structured State Space - Diagonal) is a simplified variant of S4 that uses a **diagonal parameterization** instead of the DPLR (Diagonal Plus Low-Rank) structure. This makes it faster and easier to implement while maintaining competitive performance.
+
+The key difference from S4 is that S4D uses a pure diagonal matrix for A, eliminating the low-rank correction term P.
+
+## Paper Reference
+
+**On the Parameterization and Initialization of Diagonal State Space Models**
+
+Original implementation: [https://github.com/state-spaces/s4](https://github.com/state-spaces/s4)
+
+## Installation
+
+```python
+from lrnnx.models.lti import S4D
+```
+
+## Parameters
+
+<ParamField path="d_model" type="int" required>
+  Model dimension - size of input and output features.
+</ParamField>
+
+<ParamField path="d_state" type="int" default="64">
+  State dimension (N). Internal dimension of the SSM state space.
+</ParamField>
+
+<ParamField path="l_max" type="int" default="None">
+  Maximum sequence length for the kernel. Required for FFT convolution.
+</ParamField>
+
+<ParamField path="channels" type="int" default="1">
+  Number of channels/heads for multi-headed processing.
+</ParamField>
+
+<ParamField path="bottleneck" type="int" default="None">
+  Reduce dimension of inner layer. If specified, adds input projection.
+</ParamField>
+
+<ParamField path="gate" type="int" default="None">
+  Add multiplicative gating for enhanced expressiveness.
+</ParamField>
+
+<ParamField path="final_act" type="str" default="'glu'">
+  Activation after final linear layer: `'glu'`, `'id'`, or `None`.
+</ParamField>
+
+<ParamField path="dropout" type="float" default="0.0">
+  Dropout probability.
+</ParamField>
+
+<ParamField path="tie_dropout" type="bool" default="False">
+  Tie dropout mask across sequence length.
+</ParamField>
+
+<ParamField path="transposed" type="bool" default="True">
+  Input format: `(B, H, L)` if True, `(B, L, H)` if False.
+</ParamField>
+
+### SSM Configuration
+
+<ParamField path="dt_min" type="float" default="0.001">
+  Minimum timestep value.
+</ParamField>
+
+<ParamField path="dt_max" type="float" default="0.1">
+  Maximum timestep value.
+</ParamField>
+
+<ParamField path="dt_tie" type="bool" default="True">
+  Tie dt across all channels.
+</ParamField>
+
+<ParamField path="dt_transform" type="str" default="'exp'">
+  Transform applied to dt parameter.
+</ParamField>
+
+<ParamField path="rank" type="int" default="1">
+  Rank parameter (kept for compatibility, unused in diagonal mode).
+</ParamField>
+
+<ParamField path="n_ssm" type="int" default="None">
+  Number of independent SSMs. Defaults to d_model.
+</ParamField>
+
+<ParamField path="init" type="str" default="'legs'">
+  Initialization method for A matrix: `'legs'`, `'hippo'`, etc.
+</ParamField>
+
+<ParamField path="deterministic" type="bool" default="False">
+  Use deterministic initialization.
+</ParamField>
+
+<ParamField path="real_transform" type="str" default="'exp'">
+  Transform for real part of A.
+</ParamField>
+
+<ParamField path="imag_transform" type="str" default="'none'">
+  Transform for imaginary part of A.
+</ParamField>
+
+<ParamField path="is_real" type="bool" default="False">
+  Use real-valued (instead of complex) SSM.
+</ParamField>
+
+<ParamField path="disc" type="str" default="'zoh'">
+  **S4D-specific**: Discretization method. Options: `'zoh'`, `'bilinear'`.
+</ParamField>
+
+<ParamField path="lr" type="float" default="None">
+  Learning rate for SSM parameters.
+</ParamField>
+
+<ParamField path="wd" type="float" default="0.0">
+  Weight decay for SSM parameters.
+</ParamField>
+
+<ParamField path="verbose" type="bool" default="True">
+  Print initialization information.
+</ParamField>
+
+## Usage Example
+
+### Basic Usage
+
+```python
+import torch
+from lrnnx.models.lti import S4D
+
+# Create S4D model
+model = S4D(d_model=64, d_state=64, l_max=1024)
+
+# Forward pass
+x = torch.randn(2, 1024, 64)  # (batch, length, features)
+y, state = model(x)
+
+print(y.shape)  # torch.Size([2, 1024, 64])
+```
+
+### With Custom Discretization
+
+```python
+model = S4D(
+    d_model=128,
+    d_state=64,
+    l_max=2048,
+    disc="bilinear",  # Use bilinear discretization
+    dt_min=0.0001,
+    dt_max=0.1,
+)
+
+x = torch.randn(4, 2048, 128)
+y, state = model(x)
+```
+
+### Autoregressive Inference
+
+```python
+import torch
+from lrnnx.models.lti import S4D
+
+model = S4D(d_model=64, d_state=64, l_max=1024)
+batch_size = 2
+
+# Allocate inference cache
+cache = model.allocate_inference_cache(batch_size=batch_size)
+
+# Generate sequence autoregressively
+for t in range(100):
+    x_t = torch.randn(batch_size, 64)
+    y_t, cache = model.step(x_t, cache)
+    # y_t.shape: (batch_size, 64)
+```
+
+### Multi-Channel Configuration
+
+```python
+model = S4D(
+    d_model=256,
+    d_state=64,
+    l_max=4096,
+    channels=8,        # 8-headed SSM
+    dropout=0.1,
+    disc="zoh",
+)
+
+x = torch.randn(2, 4096, 256)
+y, state = model(x)
+```
+
+## Key Differences from S4
+
+### Diagonal Parameterization
+
+S4D uses a pure diagonal matrix:
+
+```
+A = Λ  (diagonal only, no low-rank term)
+```
+
+Versus S4's DPLR:
+
+```
+A = Λ - PP*  (diagonal plus low-rank)
+```
+
+This simplification:
+- ✅ Faster computation
+- ✅ Simpler implementation
+- ✅ Easier to tune
+- ⚠️ Slightly less expressive (but usually negligible)
+
+### Discretization Options
+
+S4D explicitly supports multiple discretization methods via the `disc` parameter:
+
+- **ZOH (Zero-Order Hold)**: Default, good general-purpose discretization
+- **Bilinear**: Better frequency response preservation
+
+## Architecture Details
+
+### Forward Pass
+
+Same structure as S4:
+
+1. Optional bottleneck/gating
+2. FFT-based SSM convolution (training)
+3. D skip connection
+4. GELU activation
+5. Output projection
+
+### Diagonal SSM
+
+The diagonal structure enables efficient computation:
+
+```python
+# Element-wise operations instead of matrix multiplication
+h_t = A * h_{t-1} + B @ x_t  # A is diagonal
+y_t = C @ h_t + D @ x_t
+```
+
+### Initialization
+
+- **A**: Diagonal complex matrix with HiPPO/LEGS initialization
+- **B, C**: Random Gaussian scaled by dimensions  
+- **dt**: Log-spaced between dt_min and dt_max
+- **D**: Random initialization
+
+## Performance Comparison
+
+| Model | Speed | Memory | Performance |
+|-------|-------|--------|-------------|
+| S4    | ⭐⭐⭐  | ⭐⭐⭐   | ⭐⭐⭐⭐     |
+| S4D   | ⭐⭐⭐⭐ | ⭐⭐⭐⭐  | ⭐⭐⭐⭐     |
+
+S4D is typically **10-20% faster** than S4 with similar performance.
+
+## Performance Tips
+
+<Tip>
+  S4D is a great default choice - simpler than S4 with similar performance and faster training.
+</Tip>
+
+<Note>
+  The `disc` parameter allows you to choose discretization. ZOH is recommended for most tasks, but bilinear can be better for frequency-domain applications.
+</Note>
+
+<Warning>
+  Like all LTI models, S4D does not support variable timesteps. For event-driven data, use Mamba or S7.
+</Warning>
+
+## When to Use S4D
+
+✅ **Use S4D when:**
+- You want a simple, efficient SSM
+- Training speed is important
+- You don't need the extra expressiveness of DPLR
+- You're working with regular, fixed-interval sequences
+
+❌ **Consider alternatives when:**
+- You need input-dependent dynamics → Use [Mamba](/models/ltv/mamba)
+- You need ultra-minimal parameters → Use [LRU](/models/lti/lru)
+- You want to experiment with DPLR → Use [S4](/models/lti/s4)
+
+## See Also
+
+- [S4](/models/lti/s4) - Original DPLR variant
+- [S5](/models/lti/s5) - Even simpler implementation
+- [LRU](/models/lti/lru) - Minimal diagonal SSM

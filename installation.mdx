@@ -1,0 +1,155 @@
+---
+title: Installation
+description: Install lrnnx for your PyTorch projects
+---
+
+The lrnnx library provides state-of-the-art Linear RNN architectures for sequence modeling. You can install it from PyPI or build from source.
+
+<Warning>
+Since lrnnx builds custom CUDA kernels, the installation process can take approximately 30 minutes, depending on your CPU count. The full installation with the `conv1d` extra may take even longer.
+</Warning>
+
+## Install from PyPI
+
+The simplest way to get started is to install lrnnx from PyPI using pip or uv.
+
+<Steps>
+  <Step title="Install PyTorch first (recommended)">
+    We recommend installing PyTorch first to match your specific CUDA version:
+
+    ```bash
+    pip install torch
+    ```
+
+    Visit [PyTorch's installation page](https://pytorch.org/get-started/locally/) to find the right version for your system.
+  </Step>
+
+  <Step title="Install lrnnx with --no-build-isolation">
+    After installing PyTorch, install lrnnx using the `--no-build-isolation` flag:
+
+    ```bash
+    pip install lrnnx --no-build-isolation
+    ```
+
+    This ensures the build process uses your installed PyTorch version rather than downloading a temporary one.
+  </Step>
+</Steps>
+
+### Standard installation
+
+If you prefer a simple installation without pre-installing PyTorch:
+
+```bash
+pip install lrnnx
+```
+
+### With optional causal-conv1d
+
+The `conv1d` extra includes the `causal-conv1d` package, which provides optimized convolution kernels used by some models like Mamba:
+
+```bash
+pip install "lrnnx[conv1d]"
+```
+
+<Tip>
+Use quotes around `"lrnnx[conv1d]"` to prevent your shell from interpreting the brackets as special characters.
+</Tip>
+
+### For development
+
+If you're planning to contribute to lrnnx or need development tools:
+
+```bash
+pip install "lrnnx[dev]"
+```
+
+This includes pytest, black, isort, and mypy for testing and code quality.
+
+## Install from source
+
+For the latest features or to contribute to lrnnx, you can install from source.
+
+### Using uv (recommended)
+
+[uv](https://docs.astral.sh/uv/getting-started/installation/) is a fast Python package installer that we recommend for source installations.
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/SforAiDl/lrnnx.git
+    cd lrnnx
+    ```
+  </Step>
+
+  <Step title="Sync dependencies">
+    Choose one of the following based on your needs:
+
+    <CodeGroup>
+      ```bash Standard installation
+      uv sync
+      ```
+
+      ```bash With causal-conv1d
+      uv sync --extra conv1d
+      ```
+
+      ```bash For development
+      uv sync --extra dev
+      ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+### Using pip
+
+You can also use standard pip for editable installations:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/SforAiDl/lrnnx.git
+    cd lrnnx
+    ```
+  </Step>
+
+  <Step title="Install in editable mode">
+    Choose one of the following based on your needs:
+
+    <CodeGroup>
+      ```bash Standard installation
+      pip install -e . --no-build-isolation
+      ```
+
+      ```bash With causal-conv1d
+      pip install -e ".[conv1d]" --no-build-isolation
+      ```
+
+      ```bash For development
+      pip install -e ".[dev]" --no-build-isolation
+      ```
+    </CodeGroup>
+
+    <Note>
+    The `-e` flag installs the package in editable mode, so changes to the source code are immediately reflected without reinstallation.
+    </Note>
+  </Step>
+</Steps>
+
+## Verify your installation
+
+After installation, verify that lrnnx is working correctly:
+
+```python
+import torch
+from lrnnx.models.lti import LRU
+
+# Create a simple model
+model = LRU(d_model=64, d_state=64)
+print("lrnnx installed successfully!")
+```
+
+If this runs without errors, you're ready to start using lrnnx in your projects.
+
+## Next steps
+
+Now that you have lrnnx installed, check out the [Quickstart](/quickstart) guide to learn how to use the library.

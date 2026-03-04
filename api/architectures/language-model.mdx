@@ -1,0 +1,308 @@
+---
+title: 'LRNNLMHeadModel'
+description: 'LRNN Language Model with causal language modeling head'
+---
+
+## Overview
+
+`LRNNLMHeadModel` is a complete language model architecture that combines the LRNN backbone with a language modeling head for next-token prediction tasks.
+
+## Class Definition
+
+```python
+from lrnnx.architectures import LRNNLMHeadModel
+
+model = LRNNLMHeadModel(
+    d_model=512,
+    d_state=64,
+    n_layer=12,
+    vocab_size=50257,
+    mixer_types=["LRU", "S5", "attn"] * 4,
+    d_intermediate=2048,
+    tie_embeddings=True
+)
+```
+
+## Parameters
+
+<ParamField path="d_model" type="int" required>
+  Model dimension (hidden size).
+</ParamField>
+
+<ParamField path="d_state" type="int" required>
+  State dimension for the LRNN layers.
+</ParamField>
+
+<ParamField path="n_layer" type="int" required>
+  Number of layers in the model.
+</ParamField>
+
+<ParamField path="vocab_size" type="int" required>
+  Size of the vocabulary.
+</ParamField>
+
+<ParamField path="mixer_types" type="list" required>
+  List of mixer type names for each layer. Must have length equal to `n_layer`.
+  
+  Available mixer types:
+  - `"LRU"` - Linear Recurrent Unit
+  - `"S4"` - Structured State Space (S4)
+  - `"S4D"` - Diagonal State Space (S4D)
+  - `"S5"` - Simplified State Space (S5)
+  - `"Centaurus"` - Centaurus mixer
+  - `"Mamba"` - Mamba (LTV)
+  - `"RGLRU"` - Recurrent Gated Linear Recurrent Unit
+  - `"S7"` - S7 (LTV)
+  - `"attn"` - Multi-head attention
+  
+  Example: `["LRU", "S5", "attn", "Mamba", ...]`
+</ParamField>
+
+<ParamField path="d_intermediate" type="int" default="0">
+  Intermediate dimension for MLP layers. Set to 0 to disable MLP.
+</ParamField>
+
+<ParamField path="mixer_kwargs" type="dict" default="None">
+  Additional arguments for mixer layers. Can be:
+  - A dict mapping mixer type names to their kwargs: `{"S5": {"dt_min": 0.001}, "attn": {"num_heads": 8}}`
+  - A single dict applied to all mixers
+</ParamField>
+
+<ParamField path="mlp_cls" type="type" default="None">
+  MLP class to use. Defaults to `GatedMLP`.
+</ParamField>
+
+<ParamField path="norm_epsilon" type="float" default="1e-5">
+  Epsilon value for layer normalization.
+</ParamField>
+
+<ParamField path="rms_norm" type="bool" default="True">
+  Whether to use RMSNorm instead of LayerNorm.
+</ParamField>
+
+<ParamField path="fused_add_norm" type="bool" default="True">
+  Whether to use fused add+norm operations (requires Triton kernels).
+</ParamField>
+
+<ParamField path="residual_in_fp32" type="bool" default="False">
+  Whether to compute residuals in float32 precision.
+</ParamField>
+
+<ParamField path="tie_embeddings" type="bool" default="True">
+  Whether to tie input and output embeddings (weight sharing).
+</ParamField>
+
+<ParamField path="pad_vocab_size_multiple" type="int" default="8">
+  Pad vocabulary size to a multiple of this value for efficiency.
+</ParamField>
+
+<ParamField path="initializer_cfg" type="dict" default="None">
+  Configuration for weight initialization.
+</ParamField>
+
+<ParamField path="device" type="torch.device" default="None">
+  Device to place tensors on.
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype" default="None">
+  Data type for tensors.
+</ParamField>
+
+## Methods
+
+### forward
+
+```python
+output = model.forward(
+    input_ids,
+    position_ids=None,
+    inference_params=None,
+    num_last_tokens=0,
+    integration_timesteps=None,
+    lengths=None
+)
+```
+
+Forward pass of the language model.
+
+<ParamField path="input_ids" type="torch.Tensor" required>
+  Input token IDs of shape `(B, L)`.
+</ParamField>
+
+<ParamField path="position_ids" type="torch.Tensor" default="None">
+  Position IDs (unused, for compatibility).
+</ParamField>
+
+<ParamField path="inference_params" type="dict" default="None">
+  Parameters for inference mode.
+</ParamField>
+
+<ParamField path="num_last_tokens" type="int" default="0">
+  If > 0, only return logits for the last n tokens.
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor" default="None">
+  Timesteps for LTV models (shape: `(B, L)`).
+</ParamField>
+
+<ParamField path="lengths" type="torch.Tensor" default="None">
+  Sequence lengths for variable-length sequences (shape: `(B,)`).
+</ParamField>
+
+<ResponseField name="output" type="namedtuple">
+  Returns a `CausalLMOutput` namedtuple with:
+  - `logits` (torch.Tensor): Logits of shape `(B, L, vocab_size)`
+</ResponseField>
+
+### step
+
+```python
+output = model.step(
+    input_ids,
+    caches,
+    integration_timesteps=None
+)
+```
+
+Single-step inference for autoregressive generation.
+
+<ParamField path="input_ids" type="torch.Tensor" required>
+  Input token IDs of shape `(B, 1)` — single token.
+</ParamField>
+
+<ParamField path="caches" type="dict" required>
+  Dictionary mapping layer indices to their cached states.
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor" default="None">
+  Integration timesteps for LTV models (shape: `(B, 1)` or `(B,)`).
+</ParamField>
+
+<ResponseField name="output" type="namedtuple">
+  Returns a `CausalLMOutput` namedtuple with:
+  - `logits` (torch.Tensor): Logits of shape `(B, 1, vocab_size)`
+</ResponseField>
+
+### allocate_inference_cache
+
+```python
+caches = model.allocate_inference_cache(
+    batch_size=4,
+    max_seqlen=2048,
+    dtype=torch.float16
+)
+```
+
+Allocate inference cache for autoregressive generation.
+
+<ParamField path="batch_size" type="int" required>
+  Batch size for inference.
+</ParamField>
+
+<ParamField path="max_seqlen" type="int" required>
+  Maximum sequence length for inference.
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype" default="None">
+  Data type for cache tensors.
+</ParamField>
+
+<ResponseField name="caches" type="dict">
+  Dictionary mapping layer indices to their allocated caches.
+</ResponseField>
+
+### tie_weights
+
+```python
+model.tie_weights()
+```
+
+Tie input and output embeddings. This makes the embedding layer and language modeling head share the same weights, which is a common practice to reduce parameters and improve performance.
+
+### save_pretrained
+
+```python
+model.save_pretrained("./my_model")
+```
+
+Save the model and configuration to a directory.
+
+<ParamField path="save_directory" type="str" required>
+  Directory path where model and config will be saved.
+</ParamField>
+
+### from_pretrained
+
+```python
+model = LRNNLMHeadModel.from_pretrained(
+    "./my_model",
+    device="cuda",
+    dtype=torch.bfloat16
+)
+```
+
+Load a pretrained model from a directory (class method).
+
+<ParamField path="pretrained_model_path" type="str" required>
+  Path to directory containing saved model and config.
+</ParamField>
+
+<ParamField path="mixer_kwargs" type="dict" default="None">
+  Additional keyword arguments for mixer.
+</ParamField>
+
+<ParamField path="mlp_cls" type="type" default="None">
+  MLP class to use.
+</ParamField>
+
+<ParamField path="initializer_cfg" type="dict" default="None">
+  Configuration for weight initialization.
+</ParamField>
+
+<ParamField path="device" type="torch.device" default="None">
+  Device to place tensors on.
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype" default="None">
+  Data type for tensors.
+</ParamField>
+
+<ResponseField name="model" type="LRNNLMHeadModel">
+  Loaded model instance.
+</ResponseField>
+
+## Example Usage
+
+```python
+import torch
+from lrnnx.architectures import LRNNLMHeadModel
+
+# Create model
+model = LRNNLMHeadModel(
+    d_model=512,
+    d_state=64,
+    n_layer=6,
+    vocab_size=50257,
+    mixer_types=["LRU", "S5"] * 3,
+    d_intermediate=2048,
+    tie_embeddings=True
+).cuda()
+
+# Training forward pass
+input_ids = torch.randint(0, 50257, (2, 128)).cuda()
+output = model(input_ids)
+logits = output.logits  # (2, 128, 50257)
+
+# Autoregressive generation
+caches = model.allocate_inference_cache(batch_size=1, max_seqlen=2048)
+token_id = torch.tensor([[1]]).cuda()  # Start token
+
+for _ in range(100):
+    output = model.step(token_id, caches)
+    next_token = output.logits.argmax(dim=-1)
+    token_id = next_token
+
+# Save and load
+model.save_pretrained("./my_lrnn_model")
+loaded_model = LRNNLMHeadModel.from_pretrained("./my_lrnn_model")
+```

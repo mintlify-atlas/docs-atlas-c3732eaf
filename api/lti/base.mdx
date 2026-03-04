@@ -1,0 +1,216 @@
+---
+title: "LTI_LRNN"
+description: "Base class for Linear Time-Invariant LRNN models"
+icon: "square-root-variable"
+---
+
+## Overview
+
+`LTI_LRNN` is the abstract base class for all Linear Time-Invariant (LTI) LRNN models in lrnnx. LTI models have time-invariant system matrices (A, B, C), enabling efficient parallel training via convolution.
+
+<Note>
+LTI models do not support async discretization as that requires time-varying dynamics. For async/event-driven models, use [LTV models](/concepts/ltv).
+</Note>
+
+## Class Hierarchy
+
+```
+LRNN (from lrnnx.core.base)
+└── LTI_LRNN
+    ├── S4
+    ├── S4D
+    ├── S5
+    ├── LRU
+    └── CentaurusBase
+        ├── CentaurusNeck
+        ├── CentaurusDWS
+        ├── CentaurusFull
+        └── CentaurusPWNeck
+```
+
+## Import
+
+```python
+from lrnnx.models.lti.base import LTI_LRNN
+```
+
+## Constructor
+
+```python
+LTI_LRNN(
+    discretization: Literal["zoh", "bilinear", "dirac", "no_discretization"]
+)
+```
+
+### Parameters
+
+<ParamField path="discretization" type="Literal['zoh', 'bilinear', 'dirac', 'no_discretization']" required>
+  Discretization method to use:
+  - `"zoh"`: Zero-order hold discretization
+  - `"bilinear"`: Bilinear transform (Tustin's method)
+  - `"dirac"`: Dirac/impulse discretization
+  - `"no_discretization"`: No explicit discretization (e.g., for models with built-in discretization)
+</ParamField>
+
+## Abstract Methods
+
+Subclasses must implement the following methods:
+
+### discretize
+
+```python
+@abstractmethod
+def discretize() -> tuple[Tensor, Union[Tensor, float], Tensor]
+```
+
+Discretizes the continuous-time system matrices A, B, and C with a learned step-size delta.
+
+<ResponseField name="return" type="tuple[Tensor, Union[Tensor, float], Tensor]">
+  A tuple containing:
+  - **A_bar**: Discretized system matrix, shape `(B, N)` or `(N,)`
+  - **B_bar**: Discretized input matrix, shape `(B, N, H)` or float
+  - **C**: Output matrix, shape `(B, H, N)` or `(H, N)`
+</ResponseField>
+
+---
+
+### compute_kernel
+
+```python
+@abstractmethod
+def compute_kernel(*args, **kwargs) -> tuple[Tensor, Tensor]
+```
+
+Computes the convolution kernel for efficient parallel processing. This is only relevant for LTI models; for LTV models this would materialize a huge vector in memory at every timestep.
+
+<ParamField path="*args" type="Any">
+  Model-specific arguments (e.g., sequence length, discretized matrices). See subclass implementations for details.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional model-specific keyword arguments.
+</ParamField>
+
+<ResponseField name="return" type="tuple[Tensor, Tensor]">
+  A tuple containing:
+  - **K**: Powers of A matrix (A^0, A^1, ..., A^{L-1}), shape `(N, L)`
+  - **B_norm**: Normalized input projection matrix, shape `(N, H)`
+</ResponseField>
+
+---
+
+### step
+
+```python
+@abstractmethod
+def step(
+    x: torch.Tensor,
+    inference_cache: Dict[str, Any],
+    **kwargs
+) -> Tuple[torch.Tensor, Dict[str, Any]]
+```
+
+Performs a single recurrent step of the LTI model for autoregressive inference.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input at current timestep, shape `(B, H)`
+</ParamField>
+
+<ParamField path="inference_cache" type="Dict[str, Any]" required>
+  Cache dictionary from `allocate_inference_cache()` containing recurrent state and pre-computed matrices. Updated in-place and returned.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments.
+</ParamField>
+
+<ResponseField name="return" type="tuple[Tensor, Dict[str, Any]]">
+  A tuple containing:
+  - **y**: Output at current timestep, shape `(B, H)`
+  - **inference_cache**: Updated cache dictionary
+</ResponseField>
+
+---
+
+### allocate_inference_cache
+
+```python
+@abstractmethod
+def allocate_inference_cache(
+    batch_size: int,
+    max_seqlen: int = 1,
+    dtype: Optional[torch.dtype] = None,
+    **kwargs
+) -> Dict[str, Any]
+```
+
+Allocates initial state and caches matrices for efficient inference. For LTI models, the system matrices (A, B, C) are time-invariant, so they can be pre-computed once and reused for all timesteps during autoregressive generation.
+
+<ParamField path="batch_size" type="int" required>
+  The batch size for inference.
+</ParamField>
+
+<ParamField path="max_seqlen" type="int" default={1}>
+  Maximum sequence length (unused for LTI, kept for interface consistency with LTV models).
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype" default={null}>
+  Data type for allocated tensors.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional model-specific arguments.
+</ParamField>
+
+<ResponseField name="return" type="Dict[str, Any]">
+  Cache dictionary containing initial state and pre-computed matrices for use in `step()`.
+</ResponseField>
+
+## Example Usage
+
+```python
+# LTI_LRNN is abstract - use concrete implementations
+from lrnnx.models.lti import S5
+
+# Create an LTI model
+model = S5(d_model=64, d_state=64, discretization="zoh")
+
+# Training: parallel mode with full sequences
+x = torch.randn(2, 128, 64)  # (batch, length, features)
+y = model(x)
+
+# Inference: autoregressive mode with step()
+cache = model.allocate_inference_cache(batch_size=2)
+for t in range(128):
+    x_t = torch.randn(2, 64)  # (batch, features)
+    y_t, cache = model.step(x_t, cache)
+```
+
+## Key Concepts
+
+### Time-Invariance
+
+LTI models have constant system matrices throughout the sequence. This enables:
+- **Efficient parallel training** via FFT-based convolution
+- **Pre-computed kernels** that don't depend on timestep
+- **Cached discrete matrices** for fast autoregressive generation
+
+### Discretization
+
+The `discretization` parameter controls how continuous-time dynamics are converted to discrete-time:
+
+- **ZOH (Zero-Order Hold)**: Most common, assumes input is constant between timesteps
+- **Bilinear**: Tustin's method, better frequency domain properties
+- **Dirac**: Impulse-based discretization
+- **No discretization**: For models with custom discretization logic
+
+See [Discretization Methods](/concepts/discretization) for details.
+
+## See Also
+
+- [S4 API Reference](/api/lti/s4) - Diagonal plus low-rank SSM
+- [S4D API Reference](/api/lti/s4d) - Diagonal SSM variant
+- [S5 API Reference](/api/lti/s5) - Simplified S4 architecture
+- [LRU API Reference](/api/lti/lru) - Linear Recurrent Unit
+- [Centaurus API Reference](/api/lti/centaurus) - Multi-mode SSM architecture
+- [LTI Concepts](/concepts/lti) - Understanding Linear Time-Invariant models

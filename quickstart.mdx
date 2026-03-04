@@ -1,80 +1,99 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with lrnnx in minutes
 ---
 
-## Get started in three steps
+This guide will help you run your first Linear RNN model with lrnnx.
 
-Get your documentation site running locally and make your first customization.
+## Install lrnnx
 
-### Step 1: Set up your local environment
+First, install the library:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+```bash
+pip install lrnnx
+```
 
-### Step 2: Deploy your changes
+<Tip>
+We recommend installing PyTorch first to match your CUDA version, then install lrnnx with `--no-build-isolation`.
+</Tip>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Basic usage
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+lrnnx provides two main categories of models:
+- **LTI (Linear Time-Invariant)**: Models with fixed dynamics (S4, S4D, S5, LRU, Centaurus)
+- **LTV (Linear Time-Varying)**: Models with input-dependent dynamics (Mamba, S6, S7, RG-LRU)
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+### LTI model example
 
-### Step 3: Go live
+```python
+from lrnnx.models.lti import LRU
+import torch
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+# Create model
+model = LRU(d_model=64, d_state=64).cuda()
+
+# Create input
+batch_size, seq_len, d_model = 2, 128, 64
+x = torch.randn(batch_size, seq_len, d_model, dtype=torch.float32, device="cuda")
+
+# Forward pass
+output = model(x)
+print(output.shape)  # torch.Size([2, 128, 64])
+```
+
+### LTV model example
+
+```python
+from lrnnx.models.ltv import Mamba
+import torch
+
+# Create model
+model = Mamba(d_model=64, d_state=16).cuda()
+
+# Create input
+batch_size, seq_len, d_model = 2, 128, 64
+x = torch.randn(batch_size, seq_len, d_model, dtype=torch.float32, device="cuda")
+
+# Forward pass
+output = model(x)
+print(output.shape)  # torch.Size([2, 128, 64])
+```
+
+## Available models
+
+### LTI models
+
+- **S4** - Structured State Space model with DPLR parameterization
+- **S4D** - Diagonal variant of S4 (simpler, faster)
+- **S5** - Simplified State Space model
+- **LRU** - Linear Recurrent Unit (minimal diagonal SSM)
+- **Centaurus** - Multi-mode architecture with intra-state mixing
+
+### LTV models
+
+- **Mamba** - Selective State Space model with input-dependent dynamics
+- **S6** - Time-varying variant of S4 (included in Mamba)
+- **S7** - All matrices input-dependent (A, B, C, D)
+- **RG-LRU** - Gated LRU from Griffin architecture
+- **STREAM** - Event-based variant (use with `integration_timesteps` parameter)
+
+<Tip>
+Import models from `lrnnx.models.lti` for LTI models or `lrnnx.models.ltv` for LTV models.
+</Tip>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Training guide" icon="graduation-cap" href="/guides/training">
+    Learn how to train models for your tasks
+  </Card>
+  <Card title="Inference guide" icon="bolt" href="/guides/inference">
+    Optimize inference with CUDA graphs for 10x speedup
+  </Card>
+  <Card title="Model overview" icon="book-open" href="/models/overview">
+    Explore all available models in detail
+  </Card>
+  <Card title="Architectures" icon="sitemap" href="/architectures/language-model">
+    Use pre-built architectures for language modeling, U-Net, and classification
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

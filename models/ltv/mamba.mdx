@@ -1,0 +1,380 @@
+---
+title: Mamba
+description: Selective state space model with input-dependent dynamics
+---
+
+## Overview
+
+Mamba is a **selective state space model** that uses input-dependent dynamics to filter and process sequences. Unlike LTI models with fixed dynamics, Mamba's state transition matrices (A, B, C) are computed from the input at each timestep, enabling selective memory and forgetting.
+
+Mamba achieves state-of-the-art performance on language modeling while maintaining linear scaling with sequence length.
+
+## Paper Reference
+
+**Mamba: Linear-Time Sequence Modeling with Selective State Spaces**
+
+GitHub: [https://github.com/state-spaces/mamba](https://github.com/state-spaces/mamba)
+
+Original paper: [https://arxiv.org/abs/2312.00752](https://arxiv.org/abs/2312.00752)
+
+## Installation
+
+```python
+from lrnnx.models.ltv import Mamba
+```
+
+## Parameters
+
+<ParamField path="d_model" type="int" required>
+  Model dimension - size of input and output features.
+</ParamField>
+
+<ParamField path="d_state" type="int" default="16">
+  SSM state dimension (N). Typically smaller than LTI models (16-64 vs 64-256).
+</ParamField>
+
+<ParamField path="d_conv" type="int" default="4">
+  Convolution kernel size for temporal mixing before SSM. Usually 3-4.
+</ParamField>
+
+<ParamField path="expand" type="int" default="2">
+  Expansion factor for inner dimension. `d_inner = expand * d_model`.
+</ParamField>
+
+<ParamField path="dt_rank" type="Union[int, str]" default="'auto'">
+  Rank for delta (timestep) projection. `'auto'` sets it to `ceil(d_model / 16)`.
+</ParamField>
+
+<ParamField path="dt_min" type="float" default="0.001">
+  Minimum value for delta initialization.
+</ParamField>
+
+<ParamField path="dt_max" type="float" default="0.1">
+  Maximum value for delta initialization.
+</ParamField>
+
+<ParamField path="dt_init" type="str" default="'random'">
+  Delta initialization method: `'random'` or `'constant'`.
+</ParamField>
+
+<ParamField path="dt_scale" type="float" default="1.0">
+  Scale factor for dt initialization.
+</ParamField>
+
+<ParamField path="dt_init_floor" type="float" default="1e-4">
+  Minimum floor value for dt initialization.
+</ParamField>
+
+<ParamField path="conv_bias" type="bool" default="True">
+  Whether to use bias in the Conv1d layer.
+</ParamField>
+
+<ParamField path="bias" type="bool" default="False">
+  Whether to use bias in linear projections.
+</ParamField>
+
+<ParamField path="use_fast_path" type="bool" default="True">
+  Whether to use fused CUDA kernels when available. Significantly faster.
+</ParamField>
+
+<ParamField path="layer_idx" type="int" default="None">
+  Layer index for multi-layer caching in inference.
+</ParamField>
+
+<ParamField path="discretization" type="str" default="'mamba'">
+  Discretization method: `'mamba'`, `'zoh'`, `'bilinear'`, or `'dirac'`.
+</ParamField>
+
+<ParamField path="device" type="torch.device" default="None">
+  Device for model parameters.
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype" default="None">
+  Data type for model parameters.
+</ParamField>
+
+## Usage Example
+
+### Basic Usage
+
+```python
+import torch
+from lrnnx.models.ltv import Mamba
+
+# Create Mamba model
+model = Mamba(d_model=64, d_state=16, d_conv=4)
+
+# Forward pass
+x = torch.randn(2, 128, 64)  # (batch, length, features)
+y = model(x)
+
+print(y.shape)  # torch.Size([2, 128, 64])
+```
+
+### Language Modeling Configuration
+
+```python
+import torch
+from lrnnx.models.ltv import Mamba
+
+# Typical configuration for language modeling
+model = Mamba(
+    d_model=768,
+    d_state=16,
+    d_conv=4,
+    expand=2,
+    dt_rank="auto",
+    use_fast_path=True,
+)
+
+x = torch.randn(4, 2048, 768)  # (batch, seq_len, d_model)
+y = model(x)
+```
+
+### Autoregressive Inference
+
+```python
+import torch
+from lrnnx.models.ltv import Mamba
+
+model = Mamba(d_model=256, d_state=16)
+batch_size = 2
+max_seqlen = 1024
+
+# Allocate inference cache
+cache = model.allocate_inference_cache(
+    batch_size=batch_size,
+    max_seqlen=max_seqlen
+)
+
+# Initialize seqlen_offset
+cache["seqlen_offset"] = 0
+
+# Generate sequence token-by-token
+for t in range(100):
+    x_t = torch.randn(batch_size, 1, 256)  # (B, 1, D)
+    y_t, cache = model.step(x_t, cache)
+    # y_t.shape: (batch_size, 1, 256)
+```
+
+### Event-Based Processing (Async Mode)
+
+```python
+import torch
+from lrnnx.models.ltv import Mamba
+
+# Mamba with event-based discretization
+model = Mamba(d_model=64, d_state=16, discretization="mamba")
+
+# Input with variable timesteps
+x = torch.randn(2, 128, 64)
+timesteps = torch.rand(2, 128) * 0.1  # Variable time intervals
+
+# Forward with integration_timesteps
+y = model(x, integration_timesteps=timesteps)
+```
+
+## Key Features
+
+### Selective State Space
+
+Mamba's core innovation is **input-dependent selection**:
+
+```python
+# Project input to get B, C, and delta
+B, C, delta = project(x)  # All depend on input!
+
+# Selective scan
+y = selective_scan(x, delta, A, B, C, D)
+```
+
+This allows the model to:
+- **Focus** on relevant information
+- **Forget** irrelevant details
+- **Adapt** dynamics per timestep
+
+### Hardware-Efficient Design
+
+1. **Conv1d**: Short temporal convolution for local mixing
+2. **SSM**: Selective state space for long-range dependencies
+3. **Gating**: Multiplicative gating for expressiveness
+
+```python
+# Mamba architecture
+x, z = split(input_proj(x))  # Dual pathways
+x = conv1d(x)                # Local mixing
+x = ssm(x)                   # Selective SSM
+y = x * silu(z)              # Gating
+out = output_proj(y)         # Output
+```
+
+### S4D Initialization
+
+Mamba uses S4D-style initialization for A:
+
+```python
+A = -torch.arange(1, d_state + 1)  # Diagonal: [-1, -2, ..., -N]
+A_log = log(A)
+```
+
+This encourages exponential decay patterns that work well for selective processing.
+
+### Fast Path (CUDA Kernels)
+
+When `use_fast_path=True` and CUDA kernels are available:
+
+```python
+# Fused kernel combines:
+# - Conv1d
+# - SSM projection
+# - Selective scan  
+# - Gating
+# - Output projection
+out = mamba_inner_fn(...)  # Single fused operation
+```
+
+This is **significantly faster** than the PyTorch fallback.
+
+## Architecture Details
+
+### Forward Pass Structure
+
+1. **Input Projection**: `x, z = split(in_proj(x))`
+   - Creates two pathways: SSM and gate
+
+2. **Conv1d**: `x = conv1d(x)`
+   - Short temporal convolution (d_conv=4)
+   - Causal (no future information)
+
+3. **SSM Projection**: `delta, B, C = x_proj(x)`
+   - Project to get input-dependent parameters
+   - delta: (B, D, L) - per-channel timesteps
+   - B: (B, N, L) - input matrix
+   - C: (B, N, L) - output matrix
+
+4. **Selective Scan**: `y = selective_scan(x, delta, A, B, C, D)`
+   - Core SSM computation
+   - Uses input-dependent B, C, delta
+   - Fixed A (learned, but not input-dependent)
+
+5. **Gating**: `y = y * silu(z)`
+   - Multiplicative gating with SiLU
+
+6. **Output**: `out = out_proj(y)`
+   - Final linear projection
+
+### Discretization Methods
+
+Mamba supports multiple discretization schemes:
+
+#### Mamba (Default)
+
+```python
+dA = exp(delta * A)
+dB = delta * B
+```
+
+Simplest, works well for most tasks.
+
+#### Zero-Order Hold (ZOH)
+
+```python
+dA = exp(delta * A)
+dB = (dA - 1) / A * B
+```
+
+More principled, better for control theory tasks.
+
+#### Bilinear
+
+```python
+v = 0.5 * delta * A
+dA = (1 + v) / (1 - v)
+dB = delta / (1 - v) * B
+```
+
+Better frequency preservation.
+
+### Event-Based Mode (Async)
+
+When `integration_timesteps` is provided:
+
+```python
+# Asymmetric discretization
+dtA = integration_timesteps * softplus(dtA_proj.bias)
+dtB = softplus(dt_proj(x) + dt_proj.bias)
+
+# Separate time scales for A and B
+dA = exp(dtA * A)
+dB = dtB * B
+```
+
+This enables **event-driven processing** with variable time intervals.
+
+## State Representation
+
+Mamba maintains:
+
+```python
+conv_state: (batch_size, d_inner, d_conv) dtype=float
+lrnn_state: (batch_size, d_inner, d_state) dtype=float
+seqlen_offset: int
+```
+
+- **conv_state**: Last d_conv timesteps for causal conv
+- **lrnn_state**: SSM hidden state
+- **seqlen_offset**: Current position (for autoregressive)
+
+## Performance Tips
+
+<Tip>
+  Always use `use_fast_path=True` in production. The CUDA kernels are 3-5x faster than PyTorch fallback.
+</Tip>
+
+<Warning>
+  Make sure to install the optional CUDA dependencies (`causal-conv1d` and `mamba-ssm`) for best performance:
+  ```bash
+  pip install causal-conv1d>=1.1.0
+  pip install mamba-ssm
+  ```
+</Warning>
+
+<Note>
+  For language modeling, typical values are:
+  - `d_state=16` (small state)
+  - `d_conv=4` (short convolution)
+  - `expand=2` (2x expansion)
+  
+  These balance performance and efficiency.
+</Note>
+
+## When to Use Mamba
+
+✅ **Use Mamba when:**
+- You need **selective processing** (focus on important info)
+- Working on **language modeling** or NLP
+- You want **state-of-the-art performance**
+- **Long sequences** are common
+- You have **GPU/CUDA** available
+
+❌ **Consider alternatives when:**
+- Training speed is critical → [S4D](/models/lti/s4d) (faster training)
+- Minimal parameters needed → [LRU](/models/lti/lru)
+- Simpler model preferred → [S5](/models/lti/s5) or [RG-LRU](/models/ltv/rglru)
+
+## Comparison with Other Models
+
+| Model | Type | Selective | Speed (Train) | Speed (Infer) | Performance |
+|-------|------|-----------|---------------|---------------|-------------|
+| Mamba | LTV | ✅ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| S4D | LTI | ❌ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| RG-LRU | LTV | ✅ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| S7 | LTV | ✅ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+
+Mamba offers the best **accuracy-efficiency tradeoff** for selective tasks.
+
+## See Also
+
+- [RG-LRU](/models/ltv/rglru) - Simpler gated selective model
+- [S7](/models/ltv/s7) - Alternative selective SSM
+- [S4D](/models/lti/s4d) - Non-selective but faster training

@@ -1,0 +1,139 @@
+---
+title: Models Overview
+description: Overview of all state space models in lrnnx
+---
+
+The lrnnx library provides implementations of state-of-the-art state space models (SSMs) for sequence modeling. These models are divided into two main categories: **LTI (Linear Time-Invariant)** and **LTV (Linear Time-Varying)**.
+
+## LTI vs LTV Models
+
+### LTI (Linear Time-Invariant) Models
+
+LTI models have **time-invariant dynamics**, meaning the state transition matrices (A, B, C) remain constant across all timesteps. This property enables:
+
+- **FFT-based convolution** for efficient parallel training
+- **Pre-computed kernels** that can be reused
+- **Lower computational overhead** during inference
+- **Faster training** on long sequences
+
+However, LTI models:
+- Cannot adapt their dynamics based on input content
+- Do not support async/event-driven discretization
+- May be less expressive for certain tasks
+
+### LTV (Linear Time-Varying) Models
+
+LTV models have **time-varying dynamics**, where state transition matrices can change at each timestep based on the input. This makes them:
+
+- **More expressive** and capable of selective processing
+- **Input-dependent** - can focus on relevant information
+- **Compatible with event-driven processing** (variable timesteps)
+
+However, LTV models:
+- Cannot use FFT-based convolution (must use sequential scan)
+- Require more computation during training
+- Have higher memory overhead
+
+## Available Models
+
+### LTI Models
+
+<CardGroup cols={2}>
+  <Card title="S4" icon="wave-square" href="/models/lti/s4">
+    Structured State Space model with DPLR parameterization. Uses complex diagonal plus low-rank matrices for efficient computation.
+  </Card>
+  
+  <Card title="S4D" icon="wave-square" href="/models/lti/s4d">
+    Diagonal variant of S4 with simplified initialization. Faster than S4 with competitive performance.
+  </Card>
+  
+  <Card title="S5" icon="layer-group" href="/models/lti/s5">
+    Simplified S4 with multiple discretization options (ZOH, bilinear, Dirac). Easy to implement and understand.
+  </Card>
+  
+  <Card title="LRU" icon="circle-dot" href="/models/lti/lru">
+    Linear Recurrent Unit with diagonal complex dynamics. Minimal parameterization with strong performance.
+  </Card>
+  
+  <Card title="Centaurus" icon="grid" href="/models/lti/centaurus">
+    Multi-mode SSM with intra-state mixing. Supports neck, DWS, full, and pointwise variants.
+  </Card>
+</CardGroup>
+
+### LTV Models
+
+<CardGroup cols={2}>
+  <Card title="Mamba" icon="snake" href="/models/ltv/mamba">
+    Selective state space model with input-dependent dynamics. State-of-the-art performance on language modeling.
+  </Card>
+  
+  <Card title="RG-LRU" icon="gate-open" href="/models/ltv/rglru">
+    Recurrent Gated LRU from Griffin. Simple and efficient with competitive performance.
+  </Card>
+  
+  <Card title="S7" icon="sparkles" href="/models/ltv/s7">
+    Selective and Simplified SSM with input-dependent matrices. HiPPO initialization for better long-range dependencies.
+  </Card>
+</CardGroup>
+
+## Choosing the Right Model
+
+### For Language Modeling
+
+- **Best Performance**: Mamba (LTV) - state-of-the-art selective processing
+- **Efficiency**: RG-LRU (LTV) - simpler architecture, competitive results
+- **Fast Training**: S4D (LTI) - FFT-based convolution
+
+### For Long-Range Dependencies
+
+- **Ultra-long sequences**: S4 or S4D (LTI) - efficient FFT convolution
+- **Selective memory**: Mamba or S7 (LTV) - input-dependent filtering
+- **Minimal parameters**: LRU (LTI) - diagonal parameterization
+
+### For Classification/Regression
+
+- **Fixed-length sequences**: S5 or LRU (LTI) - simple and effective
+- **Variable-length**: Centaurus (LTI) - flexible architecture
+- **Event-driven data**: Mamba with async discretization (LTV)
+
+### For Time Series
+
+- **Regular sampling**: S5 or S4D (LTI) - efficient parallel processing
+- **Irregular sampling**: Mamba with integration_timesteps (LTV)
+- **Multi-scale**: Centaurus with sub_state_dim (LTI)
+
+## Discretization Methods
+
+Most models support multiple discretization schemes for converting continuous-time dynamics to discrete-time:
+
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| `zoh` | Zero-Order Hold | Default, good general purpose |
+| `bilinear` | Bilinear transform | Better frequency response |
+| `dirac` | Dirac delta | Simple, fast |
+| `async` | Asynchronous | Event-driven, variable timesteps (LTV only) |
+| `mamba` | Mamba-specific | Optimized for Mamba model |
+
+## Common Parameters
+
+Most models share these core parameters:
+
+- **d_model** (int): Model/hidden dimension - size of input/output features
+- **d_state** (int): Internal state dimension - capacity of the recurrent state
+- **discretization** (str): Discretization method - how to convert continuous to discrete time
+
+LTV models additionally support:
+- **integration_timesteps** (Tensor): Variable timesteps for event-driven processing
+- **use_fast_path** (bool): Use optimized CUDA kernels when available
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="LTI Models" icon="wave-square" href="/models/lti/s4">
+    Explore time-invariant models for efficient training
+  </Card>
+  
+  <Card title="LTV Models" icon="shuffle" href="/models/ltv/mamba">
+    Discover selective state space models
+  </Card>
+</CardGroup>

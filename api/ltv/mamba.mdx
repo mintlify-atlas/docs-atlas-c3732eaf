@@ -1,0 +1,330 @@
+---
+title: "Mamba"
+description: "Selective State Space Model with event-based processing support"
+---
+
+## Overview
+
+`Mamba` is a Selective State Space Model (SSM) that supports optional event-based processing. When `integration_timesteps` is provided, it uses asymmetric discretization with separate `dtA` and `dtB` for event-driven processing. Otherwise, it uses standard Mamba discretization.
+
+**Key features:**
+- Input-dependent selectivity via learned ∆, B, and C parameters
+- Hardware-efficient implementation with fused CUDA kernels
+- Support for event-based/asynchronous discretization
+- Causal 1D convolution for local context
+- Efficient autoregressive inference with state caching
+
+## Import
+
+```python
+from lrnnx.models.ltv import Mamba
+```
+
+## Class Signature
+
+```python
+class Mamba(LTV_LRNN)
+```
+
+## Constructor
+
+### `__init__`
+
+```python
+def __init__(
+    self,
+    d_model: int,
+    d_state: int = 16,
+    d_conv: int = 4,
+    expand: int = 2,
+    dt_rank: Union[int, str] = "auto",
+    dt_min: float = 0.001,
+    dt_max: float = 0.1,
+    dt_init: str = "random",
+    dt_scale: float = 1.0,
+    dt_init_floor: float = 1e-4,
+    conv_bias: bool = True,
+    bias: bool = False,
+    use_fast_path: bool = True,
+    layer_idx: Optional[int] = None,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
+    discretization: str = "mamba",
+)
+```
+
+Initialize Mamba model.
+
+<ParamField path="d_model" type="int" required>
+  Model dimension (input/output dimension).
+</ParamField>
+
+<ParamField path="d_state" type="int" default="16">
+  SSM state dimension (N). Controls the capacity of the state space.
+</ParamField>
+
+<ParamField path="d_conv" type="int" default="4">
+  Convolution kernel size for local context.
+</ParamField>
+
+<ParamField path="expand" type="int" default="2">
+  Expansion factor for inner dimension. Inner dimension = `d_model * expand`.
+</ParamField>
+
+<ParamField path="dt_rank" type="Union[int, str]" default="'auto'">
+  Rank for delta projection. If `"auto"`, uses `ceil(d_model / 16)`.
+</ParamField>
+
+<ParamField path="dt_min" type="float" default="0.001">
+  Minimum value for delta initialization.
+</ParamField>
+
+<ParamField path="dt_max" type="float" default="0.1">
+  Maximum value for delta initialization.
+</ParamField>
+
+<ParamField path="dt_init" type="str" default="'random'">
+  Initialization method for delta. Options: `"random"` or `"constant"`.
+</ParamField>
+
+<ParamField path="dt_scale" type="float" default="1.0">
+  Scale factor for dt initialization.
+</ParamField>
+
+<ParamField path="dt_init_floor" type="float" default="1e-4">
+  Floor value for dt initialization to prevent numerical instability.
+</ParamField>
+
+<ParamField path="conv_bias" type="bool" default="True">
+  Whether to use bias in the convolution layer.
+</ParamField>
+
+<ParamField path="bias" type="bool" default="False">
+  Whether to use bias in linear projections.
+</ParamField>
+
+<ParamField path="use_fast_path" type="bool" default="True">
+  Whether to use fused CUDA kernels when available. Significantly improves performance.
+</ParamField>
+
+<ParamField path="layer_idx" type="int | None" default="None">
+  Layer index for multi-layer caching in stacked architectures.
+</ParamField>
+
+<ParamField path="device" type="torch.device | None" default="None">
+  Device for parameters. If `None`, uses default device.
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype | None" default="None">
+  Data type for parameters. If `None`, uses default dtype.
+</ParamField>
+
+<ParamField path="discretization" type="str" default="'mamba'">
+  Discretization type. Options: `"mamba"`, `"zoh"`, `"bilinear"`, `"dirac"`.
+</ParamField>
+
+## Methods
+
+### `forward`
+
+```python
+def forward(
+    self,
+    hidden_states: torch.Tensor,
+    integration_timesteps: Optional[torch.Tensor] = None,
+    lengths: Optional[torch.Tensor] = None,
+    inference_cache: Optional[Dict[str, Any]] = None,
+) -> torch.Tensor
+```
+
+Forward pass through Mamba.
+
+<ParamField path="hidden_states" type="torch.Tensor">
+  Input tensor of shape `(B, L, D)` where:
+  - `B` = batch size
+  - `L` = sequence length
+  - `D` = model dimension (`d_model`)
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor | None" default="None">
+  Time intervals between events, shape `(B, L)`. When provided, uses asymmetric discretization with separate `dtA` and `dtB` for event-driven processing. This enables the model to handle non-uniform time intervals between sequence elements.
+</ParamField>
+
+<ParamField path="lengths" type="torch.Tensor | None" default="None">
+  Not currently used by Mamba. Kept for interface consistency.
+</ParamField>
+
+<ParamField path="inference_cache" type="Dict[str, Any] | None" default="None">
+  Cache for autoregressive generation. If provided, must contain:
+  - `"conv_state"`: Convolution state tensor
+  - `"lrnn_state"`: SSM state tensor
+  - `"seqlen_offset"`: Current position in sequence
+</ParamField>
+
+<ResponseField name="output" type="torch.Tensor">
+  Output tensor of shape `(B, L, D)`.
+</ResponseField>
+
+### `step`
+
+```python
+def step(
+    self,
+    x: torch.Tensor,
+    inference_cache: Dict[str, Any],
+    integration_timesteps: Optional[torch.Tensor] = None,
+    **kwargs,
+) -> Tuple[torch.Tensor, Dict[str, Any]]
+```
+
+Performs a single recurrent step of Mamba for autoregressive inference.
+
+<ParamField path="x" type="torch.Tensor">
+  Input at current timestep, shape `(B, 1, D)`.
+</ParamField>
+
+<ParamField path="inference_cache" type="Dict[str, Any]">
+  Cache dictionary containing:
+  - `"conv_state"`: Convolution state, shape `(B, D_inner, d_conv)`
+  - `"lrnn_state"`: SSM state, shape `(B, D_inner, N)`
+  - `"seqlen_offset"`: Current position in sequence
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor | None" default="None">
+  Integration timestep for this step, shape `(B, 1)` or `(B,)`. When provided, uses event-based asymmetric discretization.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments (unused).
+</ParamField>
+
+<ResponseField name="output" type="Tuple[torch.Tensor, Dict[str, Any]]">
+  A tuple containing:
+  - Output at current timestep, shape `(B, 1, D)`
+  - Updated cache dictionary
+</ResponseField>
+
+### `allocate_inference_cache`
+
+```python
+def allocate_inference_cache(
+    self,
+    batch_size: int,
+    max_seqlen: int,
+    dtype: Optional[torch.dtype] = None,
+    **kwargs,
+) -> Dict[str, Any]
+```
+
+Allocates cache for Mamba autoregressive inference.
+
+<ParamField path="batch_size" type="int">
+  The batch size for inference.
+</ParamField>
+
+<ParamField path="max_seqlen" type="int">
+  Maximum sequence length. Not used by Mamba but kept for interface consistency.
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype | None" default="None">
+  Data type for allocated tensors. If `None`, uses model's parameter dtype.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional arguments (unused).
+</ParamField>
+
+<ResponseField name="cache" type="Dict[str, Any]">
+  Cache dictionary containing:
+  - `"conv_state"`: Convolution state, shape `(B, D_inner, d_conv)`
+  - `"lrnn_state"`: SSM state, shape `(B, D_inner, N)`
+  - `"seqlen_offset"`: Current position (initialized to 0)
+</ResponseField>
+
+## Examples
+
+### Basic Usage
+
+```python
+import torch
+from lrnnx.models.ltv import Mamba
+
+# Create Mamba model
+model = Mamba(d_model=64, d_state=16, d_conv=4)
+
+# Standard forward pass
+x = torch.randn(2, 128, 64)
+y = model(x)
+print(y.shape)  # torch.Size([2, 128, 64])
+```
+
+### Event-Based Processing
+
+```python
+import torch
+from lrnnx.models.ltv import Mamba
+
+model = Mamba(d_model=64, d_state=16)
+
+# Input with variable time intervals between events
+x = torch.randn(2, 128, 64)
+integration_timesteps = torch.rand(2, 128)  # Non-uniform timesteps
+
+# Uses asymmetric discretization with separate dtA and dtB
+y = model(x, integration_timesteps=integration_timesteps)
+```
+
+### Autoregressive Inference
+
+```python
+import torch
+from lrnnx.models.ltv import Mamba
+
+model = Mamba(d_model=64, d_state=16)
+model.eval()
+
+# Allocate cache
+batch_size = 2
+max_seq_len = 100
+cache = model.allocate_inference_cache(
+    batch_size=batch_size,
+    max_seqlen=max_seq_len
+)
+
+# Generate sequence autoregressively
+outputs = []
+for t in range(max_seq_len):
+    x_t = get_next_input(t)  # Shape: (2, 1, 64)
+    y_t, cache = model.step(x_t, cache)
+    outputs.append(y_t)
+
+output = torch.cat(outputs, dim=1)  # Shape: (2, 100, 64)
+```
+
+### Custom Discretization
+
+```python
+import torch
+from lrnnx.models.ltv import Mamba
+
+# Use zero-order hold discretization instead of default Mamba
+model = Mamba(
+    d_model=64,
+    d_state=16,
+    discretization="zoh"  # Options: "mamba", "zoh", "bilinear", "dirac"
+)
+
+x = torch.randn(2, 128, 64)
+y = model(x)
+```
+
+## References
+
+- [Mamba: Linear-Time Sequence Modeling with Selective State Spaces](https://arxiv.org/abs/2312.00752)
+- [Event-based State Space Models](https://arxiv.org/abs/2404.18508)
+
+## See Also
+
+- [LTV_LRNN](/api/ltv/base) - Base class for LTV models
+- [RGLRU](/api/ltv/rglru) - Alternative LTV architecture
+- [S7](/api/ltv/s7) - Simplified state space model

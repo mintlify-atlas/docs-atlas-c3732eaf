@@ -1,0 +1,256 @@
+---
+title: S4
+description: Structured State Space Sequence model with DPLR parameterization
+---
+
+## Overview
+
+S4 (Structured State Space Sequence model) is a foundational LTI model that uses a **DPLR (Diagonal Plus Low-Rank)** parameterization for efficient computation. It employs complex diagonal matrices with low-rank corrections to capture long-range dependencies while maintaining computational efficiency.
+
+S4 uses FFT-based convolution for parallel training and supports efficient autoregressive inference through recurrent mode.
+
+## Paper Reference
+
+**Efficiently Modeling Long Sequences with Structured State Spaces**
+
+Original implementation: [https://github.com/state-spaces/s4](https://github.com/state-spaces/s4)
+
+## Installation
+
+```python
+from lrnnx.models.lti import S4
+```
+
+## Parameters
+
+<ParamField path="d_model" type="int" required>
+  Model dimension - size of input and output features.
+</ParamField>
+
+<ParamField path="d_state" type="int" default="64">
+  State dimension (N). Internal dimension of the SSM state space. Higher values increase capacity but also computation.
+</ParamField>
+
+<ParamField path="l_max" type="int" default="None">
+  Maximum sequence length for the kernel. Must be specified for FFT convolution mode.
+</ParamField>
+
+<ParamField path="channels" type="int" default="1">
+  Number of channels/heads. Allows multi-headed SSM processing.
+</ParamField>
+
+<ParamField path="bottleneck" type="int" default="None">
+  Reduce dimension of inner layer (e.g., used in GSS). If specified, adds an input linear projection.
+</ParamField>
+
+<ParamField path="gate" type="int" default="None">
+  Add multiplicative gating (e.g., used in GSS). Creates a gated pathway for enhanced expressiveness.
+</ParamField>
+
+<ParamField path="final_act" type="str" default="'glu'">
+  Activation after final linear layer. Options: `'glu'`, `'id'` (no activation), or `None` (no linear layer).
+</ParamField>
+
+<ParamField path="dropout" type="float" default="0.0">
+  Standard dropout probability.
+</ParamField>
+
+<ParamField path="tie_dropout" type="bool" default="False">
+  Tie dropout mask across sequence length, emulating `nn.Dropout1d`.
+</ParamField>
+
+<ParamField path="transposed" type="bool" default="True">
+  Backbone axis ordering: `(B, H, L)` if True, `(B, L, H)` if False.
+</ParamField>
+
+### SSM Configuration
+
+<ParamField path="dt_min" type="float" default="0.001">
+  Minimum value for dt (timestep) initialization.
+</ParamField>
+
+<ParamField path="dt_max" type="float" default="0.1">
+  Maximum value for dt initialization.
+</ParamField>
+
+<ParamField path="dt_tie" type="bool" default="True">
+  Tie dt across channels - uses same timestep for all channels.
+</ParamField>
+
+<ParamField path="dt_transform" type="str" default="'exp'">
+  Transformation to apply to dt. Options: `'exp'`, `'softplus'`, etc.
+</ParamField>
+
+<ParamField path="dt_fast" type="bool" default="False">
+  Fast dt initialization mode.
+</ParamField>
+
+<ParamField path="rank" type="int" default="1">
+  Rank of the low-rank correction for DPLR parameterization.
+</ParamField>
+
+<ParamField path="n_ssm" type="int" default="None">
+  Number of independent SSMs. Defaults to `d_model` if not specified.
+</ParamField>
+
+<ParamField path="init" type="str" default="'legs'">
+  Initialization method for the A matrix. Options: `'legs'`, `'lin'`, `'hippo'`, etc.
+</ParamField>
+
+<ParamField path="deterministic" type="bool" default="False">
+  Use deterministic initialization for reproducibility.
+</ParamField>
+
+<ParamField path="real_transform" type="str" default="'exp'">
+  Transformation for the real part of A matrix.
+</ParamField>
+
+<ParamField path="imag_transform" type="str" default="'none'">
+  Transformation for the imaginary part of A matrix.
+</ParamField>
+
+<ParamField path="is_real" type="bool" default="False">
+  Whether to use real-valued SSMs (instead of complex).
+</ParamField>
+
+<ParamField path="lr" type="float" default="None">
+  Specific learning rate for SSM parameters. Useful for differential learning rates.
+</ParamField>
+
+<ParamField path="wd" type="float" default="0.0">
+  Specific weight decay for SSM parameters.
+</ParamField>
+
+<ParamField path="verbose" type="bool" default="True">
+  Print initialization information during setup.
+</ParamField>
+
+## Usage Example
+
+### Basic Usage
+
+```python
+import torch
+from lrnnx.models.lti import S4
+
+# Create S4 model
+model = S4(d_model=64, d_state=64, l_max=1024)
+
+# Forward pass
+x = torch.randn(2, 1024, 64)  # (batch, length, features)
+y, state = model(x)
+
+print(y.shape)  # torch.Size([2, 1024, 64])
+```
+
+### Autoregressive Inference
+
+```python
+import torch
+from lrnnx.models.lti import S4
+
+model = S4(d_model=64, d_state=64, l_max=1024)
+batch_size = 2
+
+# Allocate inference cache
+cache = model.allocate_inference_cache(batch_size=batch_size)
+
+# Process sequence step-by-step
+for t in range(100):
+    x_t = torch.randn(batch_size, 64)  # Single timestep
+    y_t, cache = model.step(x_t, cache)
+    # y_t shape: (batch_size, 64)
+```
+
+### With Gating and Bottleneck
+
+```python
+model = S4(
+    d_model=256,
+    d_state=64,
+    l_max=2048,
+    bottleneck=2,      # Reduce to 128 dims internally
+    gate=2,            # Add gating mechanism
+    dropout=0.1,
+    channels=4,        # Multi-headed
+)
+
+x = torch.randn(4, 2048, 256)
+y, state = model(x)
+```
+
+## Key Features
+
+### DPLR Parameterization
+
+S4 uses a Diagonal Plus Low-Rank decomposition:
+
+```
+A = Λ - PP*
+```
+
+Where:
+- Λ is a complex diagonal matrix
+- P is a low-rank correction matrix
+- This enables O(N) computation instead of O(N²)
+
+### FFT Convolution
+
+For training, S4 computes the full convolution kernel and uses FFT:
+
+```python
+# Kernel computation
+K = (C @ (A^0, A^1, ..., A^L) @ B)
+# FFT convolution
+y = IFFT(FFT(K) * FFT(x))
+```
+
+### Recurrent Mode
+
+For inference, S4 uses recurrent updates:
+
+```python
+h_t = A @ h_{t-1} + B @ x_t
+y_t = C @ h_t + D @ x_t
+```
+
+## Architecture Details
+
+### Forward Pass Structure
+
+1. **Optional bottleneck projection**: Reduce input dimension
+2. **Optional input gating**: Multiplicative gating pathway
+3. **SSM convolution**: Core state space computation
+4. **D skip connection**: Direct input-output connection
+5. **Activation**: GELU activation
+6. **Optional output gating**: Gate the SSM output
+7. **Output projection**: Final linear layer with optional GLU
+
+### Initialization
+
+S4 uses specialized initialization:
+
+- **A matrix**: HiPPO or LEGS initialization for long-range memory
+- **B, C matrices**: Random initialization scaled by dimensions
+- **dt**: Log-uniform spacing between dt_min and dt_max
+- **D**: Random initialization
+
+## Performance Tips
+
+<Tip>
+  Set `l_max` to the maximum sequence length you'll encounter during training for optimal FFT performance.
+</Tip>
+
+<Warning>
+  S4 is an LTI model and does not support variable timesteps or async discretization. For event-driven data, use Mamba (LTV) instead.
+</Warning>
+
+<Note>
+  The `rank` parameter controls the expressiveness of the low-rank correction. Higher rank increases capacity but also computation. Rank=1 is usually sufficient.
+</Note>
+
+## See Also
+
+- [S4D](/models/lti/s4d) - Diagonal variant with simpler parameterization
+- [S5](/models/lti/s5) - Simplified implementation with clearer code
+- [Mamba](/models/ltv/mamba) - Input-dependent selective variant

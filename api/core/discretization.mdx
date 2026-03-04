@@ -1,0 +1,241 @@
+---
+title: Discretization Functions
+description: Methods for converting continuous-time state space models to discrete-time representations
+---
+
+## Overview
+
+Discretization functions convert continuous-time state space models to discrete-time representations. These functions are essential for implementing recurrent neural networks based on continuous-time dynamical systems.
+
+## DISCRETIZE_FNS
+
+```python
+DISCRETIZE_FNS: dict[str, Callable]
+```
+
+Dictionary mapping discretization method names to their corresponding functions. Used internally by the `LRNN` base class to select the appropriate discretization method.
+
+**Available methods:**
+- `"zoh"` → `zoh` - Zero-Order Hold
+- `"bilinear"` → `bilinear` - Bilinear transform
+- `"dirac"` → `dirac` - Dirac discretization
+- `"async"` → `async_` - Asynchronous discretization
+- `"no_discretization"` → `no_discretization` - Identity operation
+
+## Discretization Functions
+
+### zoh
+
+```python
+zoh(A, delta, integration_timesteps=None) -> tuple[Tensor, Tensor]
+```
+
+Zero-Order Hold (ZOH) discretization method, the most commonly used discretization across models.
+
+**Mathematical formulation:**
+
+$$
+\bar{A} = \exp(\Delta A)
+$$
+
+$$
+\bar{\gamma} = A^{-1} (\bar{A} - I)
+$$
+
+Reference: [S4 Blog Post](https://hazyresearch.stanford.edu/blog/2022-01-14-s4-3)
+
+<ParamField path="A" type="torch.Tensor" required>
+  The continuous-time state matrix.
+</ParamField>
+
+<ParamField path="delta" type="torch.Tensor" required>
+  The discretization step size.
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor">
+  Not used in ZOH discretization. Defaults to `None`.
+</ParamField>
+
+<ResponseField name="A_bar" type="torch.Tensor">
+  The discretized system matrix.
+</ResponseField>
+
+<ResponseField name="gamma_bar" type="torch.Tensor">
+  The input normalizer.
+</ResponseField>
+
+### bilinear
+
+```python
+bilinear(A, delta, integration_timesteps=None) -> tuple[Tensor, Tensor]
+```
+
+Bilinear transform method first introduced in the S4 model.
+
+**Mathematical formulation:**
+
+$$
+\bar{A} = (I + 0.5 \Delta A)^{-1} (I - 0.5 \Delta A)
+$$
+
+$$
+\bar{\gamma} = (I + 0.5 \Delta A)^{-1} \Delta
+$$
+
+Reference: [S4 Blog Post](https://hazyresearch.stanford.edu/blog/2022-01-14-s4-3)
+
+<ParamField path="A" type="torch.Tensor" required>
+  Continuous-time system matrix, shape `(N,)`. Only diagonal elements are used.
+</ParamField>
+
+<ParamField path="delta" type="torch.Tensor" required>
+  Time step for discretization.
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor">
+  Not used in bilinear discretization. Defaults to `None`.
+</ParamField>
+
+<ResponseField name="A_bar" type="torch.Tensor">
+  The discretized system matrix.
+</ResponseField>
+
+<ResponseField name="gamma_bar" type="torch.Tensor">
+  The input normalizer.
+</ResponseField>
+
+### dirac
+
+```python
+dirac(A, delta, integration_timesteps=None) -> tuple[Tensor, float]
+```
+
+Dirac discretization method.
+
+**Mathematical formulation:**
+
+$$
+\bar{A} = \exp(\Delta A)
+$$
+
+$$
+\bar{\gamma} = 1.0
+$$
+
+Reference: [Event-SSM GitHub](https://github.com/Efficient-Scalable-Machine-Learning/event-ssm/blob/main/event_ssm/ssm.py)
+
+<ParamField path="A" type="torch.Tensor" required>
+  Continuous-time system matrix.
+</ParamField>
+
+<ParamField path="delta" type="torch.Tensor" required>
+  Time step for discretization.
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor">
+  Not used in dirac discretization. Defaults to `None`.
+</ParamField>
+
+<ResponseField name="A_bar" type="torch.Tensor">
+  The discretized system matrix.
+</ResponseField>
+
+<ResponseField name="gamma_bar" type="float">
+  The input normalizer, fixed at `1.0`.
+</ResponseField>
+
+### async_
+
+```python
+async_(A, delta, integration_timesteps) -> tuple[Tensor, Tensor]
+```
+
+Asynchronous discretization method for event-driven models. Introduced in [arxiv:2404.18508](https://arxiv.org/abs/2404.18508) to provide a strong inductive bias for asynchronous event streams.
+
+**Mathematical formulation:**
+
+$$
+\bar{A} = \exp(\Delta \cdot \text{integration\_timesteps} \cdot A)
+$$
+
+$$
+\bar{\gamma} = A^{-1} (\exp(\Delta A) - I)
+$$
+
+<Tip>
+This method exists primarily for legacy reasons. It is not possible to use this method (or any discretization with async timesteps) with LTI models.
+</Tip>
+
+<ParamField path="A" type="torch.Tensor" required>
+  Continuous-time system matrix.
+</ParamField>
+
+<ParamField path="delta" type="torch.Tensor" required>
+  Time step for discretization.
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor" required>
+  Timesteps for async discretization, ideally of shape `(B, L)`, representing the difference in timesteps between events.
+</ParamField>
+
+<ResponseField name="A_bar" type="torch.Tensor">
+  The discretized system matrix.
+</ResponseField>
+
+<ResponseField name="gamma_bar" type="torch.Tensor">
+  The input normalizer.
+</ResponseField>
+
+### no_discretization
+
+```python
+no_discretization(A, delta, integration_timesteps=None) -> tuple[Tensor, float]
+```
+
+Identity operation that performs no discretization.
+
+**Mathematical formulation:**
+
+$$
+\bar{A} = A
+$$
+
+$$
+\bar{\gamma} = 1.0
+$$
+
+<ParamField path="A" type="torch.Tensor" required>
+  Continuous-time system matrix (returned unchanged).
+</ParamField>
+
+<ParamField path="delta" type="torch.Tensor" required>
+  Time step for discretization (unused).
+</ParamField>
+
+<ParamField path="integration_timesteps" type="torch.Tensor">
+  Not used in no_discretization. Defaults to `None`.
+</ParamField>
+
+<ResponseField name="A_bar" type="torch.Tensor">
+  Same as input `A`.
+</ResponseField>
+
+<ResponseField name="gamma_bar" type="float">
+  Fixed at `1.0`, as `B_bar = B`.
+</ResponseField>
+
+## Example Usage
+
+```python
+import torch
+from lrnnx.core.discretization import zoh, bilinear, DISCRETIZE_FNS
+
+# Direct function call
+A = torch.randn(64)  # State matrix
+delta = torch.tensor(0.01)  # Time step
+A_bar, gamma_bar = zoh(A, delta)
+
+# Using the dictionary
+discretize_fn = DISCRETIZE_FNS["bilinear"]
+A_bar, gamma_bar = discretize_fn(A, delta)
+```

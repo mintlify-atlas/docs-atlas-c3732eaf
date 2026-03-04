@@ -1,0 +1,417 @@
+---
+title: "S4"
+description: "Structured State Space Sequence model with DPLR parameterization"
+icon: "4"
+---
+
+## Overview
+
+`S4` (Structured State Space Sequence model) is an LTI LRNN that uses a diagonal plus low-rank (DPLR) parameterization of the state matrix A. This enables efficient computation while maintaining expressiveness through low-rank corrections.
+
+S4 uses FFT-based convolution for parallel training and supports autoregressive inference via the step method.
+
+## Import
+
+```python
+from lrnnx.models.lti import S4
+```
+
+## Class Signature
+
+```python
+class S4(LTI_LRNN)
+```
+
+Inherits from: [`LTI_LRNN`](/api/lti/base)
+
+## Constructor
+
+```python
+S4(
+    d_model: int,
+    bottleneck: Optional[int] = None,
+    gate: Optional[int] = None,
+    final_act: str = "glu",
+    postact: Optional[str] = None,
+    dropout: float = 0.0,
+    tie_dropout: bool = False,
+    transposed: bool = True,
+    l_max: Optional[int] = None,
+    channels: int = 1,
+    d_state: int = 64,
+    dt_min: float = 0.001,
+    dt_max: float = 0.1,
+    dt_tie: bool = True,
+    dt_transform: str = "exp",
+    dt_fast: bool = False,
+    rank: int = 1,
+    n_ssm: Optional[int] = None,
+    init: str = "legs",
+    deterministic: bool = False,
+    real_transform: str = "exp",
+    imag_transform: str = "none",
+    is_real: bool = False,
+    lr: Optional[float] = None,
+    wd: float = 0.0,
+    verbose: bool = True,
+    **layer_args
+)
+```
+
+### Parameters
+
+#### Core Parameters
+
+<ParamField path="d_model" type="int" required>
+  Model dimension (hidden size).
+</ParamField>
+
+<ParamField path="d_state" type="int" default={64}>
+  State dimension (N). The internal SSM state size. Will be halved internally due to conjugate symmetry.
+</ParamField>
+
+<ParamField path="l_max" type="int" default={null}>
+  Maximum sequence length for the kernel. Required for pre-computing convolution kernels.
+</ParamField>
+
+#### Architecture Parameters
+
+<ParamField path="bottleneck" type="int" default={null}>
+  Reduce dimension of inner layer. If provided, `d_model` is divided by this factor (used in GSS).
+</ParamField>
+
+<ParamField path="gate" type="int" default={null}>
+  Add multiplicative gating with this expansion factor (used in GSS).
+</ParamField>
+
+<ParamField path="channels" type="int" default={1}>
+  Number of independent SSM channels/heads.
+</ParamField>
+
+<ParamField path="final_act" type="str" default="glu">
+  Activation after final linear layer. Use `"id"` for identity (no activation), or `None` for no linear layer at all.
+</ParamField>
+
+<ParamField path="postact" type="str" default={null}>
+  Deprecated, use `final_act` instead.
+</ParamField>
+
+#### Dropout & Regularization
+
+<ParamField path="dropout" type="float" default={0.0}>
+  Standard dropout probability.
+</ParamField>
+
+<ParamField path="tie_dropout" type="bool" default={false}>
+  Tie dropout mask across sequence length, emulating `nn.Dropout1d`.
+</ParamField>
+
+#### Axis Ordering
+
+<ParamField path="transposed" type="bool" default={true}>
+  Backbone axis ordering:
+  - `True`: expects input shape `(B, H, L)`
+  - `False`: expects input shape `(B, L, H)`
+</ParamField>
+
+#### SSM Parameterization
+
+<ParamField path="dt_min" type="float" default={0.001}>
+  Minimum value for timestep (dt) initialization.
+</ParamField>
+
+<ParamField path="dt_max" type="float" default={0.1}>
+  Maximum value for timestep (dt) initialization.
+</ParamField>
+
+<ParamField path="dt_tie" type="bool" default={true}>
+  Tie timestep dt across channels.
+</ParamField>
+
+<ParamField path="dt_transform" type="str" default="exp">
+  Transformation to apply to dt parameter (e.g., `"exp"` for exponential).
+</ParamField>
+
+<ParamField path="dt_fast" type="bool" default={false}>
+  Use fast dt initialization.
+</ParamField>
+
+<ParamField path="rank" type="int" default={1}>
+  Rank of the low-rank correction for DPLR parameterization. Higher rank = more expressive but more parameters.
+</ParamField>
+
+<ParamField path="n_ssm" type="int" default={null}>
+  Number of independent SSMs. Defaults to `d_model` if not specified.
+</ParamField>
+
+<ParamField path="init" type="str" default="legs">
+  Initialization method for the A matrix (e.g., `"legs"`, `"hippo"`).
+</ParamField>
+
+<ParamField path="deterministic" type="bool" default={false}>
+  Use deterministic initialization for reproducibility.
+</ParamField>
+
+#### Complex SSM Parameters
+
+<ParamField path="real_transform" type="str" default="exp">
+  Transformation for the real part of A (e.g., `"exp"`, `"softplus"`).
+</ParamField>
+
+<ParamField path="imag_transform" type="str" default="none">
+  Transformation for the imaginary part of A.
+</ParamField>
+
+<ParamField path="is_real" type="bool" default={false}>
+  Whether to use real-valued SSMs (ignores imaginary components).
+</ParamField>
+
+#### Optimization
+
+<ParamField path="lr" type="float" default={null}>
+  Specific learning rate for SSM parameters. If `None`, uses the global learning rate.
+</ParamField>
+
+<ParamField path="wd" type="float" default={0.0}>
+  Specific weight decay for SSM parameters.
+</ParamField>
+
+<ParamField path="verbose" type="bool" default={true}>
+  Print initialization information.
+</ParamField>
+
+<ParamField path="**layer_args" type="Any">
+  Additional arguments passed to the internal `FFTConvS4` layer.
+</ParamField>
+
+## Methods
+
+### forward
+
+```python
+def forward(
+    x: torch.Tensor,
+    lengths: Optional[Union[torch.Tensor, int]] = None,
+    **kwargs
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]
+```
+
+Forward pass of the S4 block.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input tensor of shape `(B, H, L)` if `transposed=True`, else `(B, L, H)`.
+</ParamField>
+
+<ParamField path="lengths" type="torch.Tensor | int" default={null}>
+  Lengths of the sequences in the batch for padding masking.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional arguments (absorbs `return_output` and transformer `src_mask`).
+</ParamField>
+
+<ResponseField name="return" type="tuple[torch.Tensor, torch.Tensor | None]">
+  A tuple containing:
+  - **y**: Output tensor of the same shape as input
+  - **state**: The next recurrent state, or `None`
+</ResponseField>
+
+---
+
+### step
+
+```python
+def step(
+    x: torch.Tensor,
+    inference_cache: dict,
+    **kwargs
+) -> tuple[torch.Tensor, dict]
+```
+
+Perform a single recurrent step of the S4 model for autoregressive inference.
+
+<ParamField path="x" type="torch.Tensor" required>
+  Input at current timestep, shape `(B, H)`.
+</ParamField>
+
+<ParamField path="inference_cache" type="dict" required>
+  Cache from `allocate_inference_cache()` containing recurrent state.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments.
+</ParamField>
+
+<ResponseField name="return" type="tuple[torch.Tensor, dict]">
+  A tuple containing:
+  - **y_t**: Output tensor at the current timestep, shape `(B, H)`
+  - **inference_cache**: Updated cache dictionary
+</ResponseField>
+
+---
+
+### allocate_inference_cache
+
+```python
+def allocate_inference_cache(
+    batch_size: int,
+    max_seqlen: int = 1,
+    dtype: Optional[torch.dtype] = None,
+    **kwargs
+) -> dict
+```
+
+Allocate cache for step-by-step inference. Calls `setup_step()` to prepare discrete-time matrices (dA, dB, dC), then creates a zero-initialized hidden state.
+
+<ParamField path="batch_size" type="int" required>
+  Batch size for inference.
+</ParamField>
+
+<ParamField path="max_seqlen" type="int" default={1}>
+  Unused, kept for interface consistency.
+</ParamField>
+
+<ParamField path="dtype" type="torch.dtype" default={null}>
+  Unused.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments.
+</ParamField>
+
+<ResponseField name="return" type="dict">
+  Cache dict with `"lrnn_state"` key containing the initial hidden state.
+</ResponseField>
+
+---
+
+### default_state
+
+```python
+def default_state(
+    *batch_shape,
+    device: Optional[torch.device] = None
+) -> torch.Tensor
+```
+
+Create a default zero-initialized state for the given batch shape.
+
+<ParamField path="*batch_shape" type="int">
+  Batch dimensions.
+</ParamField>
+
+<ParamField path="device" type="torch.device" default={null}>
+  Device to create the state on.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Zero-initialized state tensor.
+</ResponseField>
+
+## Properties
+
+### d_output
+
+```python
+@property
+def d_output(self) -> int
+```
+
+Returns the output dimension (equal to `d_model`).
+
+## Example Usage
+
+### Basic Usage
+
+```python
+from lrnnx.models.lti import S4
+import torch
+
+# Create S4 model
+model = S4(d_model=64, d_state=64, l_max=1024)
+
+# Training: parallel mode
+x = torch.randn(2, 1024, 64)  # (batch, length, features)
+y, state = model(x)
+print(y.shape)  # torch.Size([2, 1024, 64])
+```
+
+### Autoregressive Inference
+
+```python
+# Allocate cache for inference
+cache = model.allocate_inference_cache(batch_size=2)
+
+# Generate sequence token by token
+outputs = []
+for t in range(100):
+    x_t = torch.randn(2, 64)  # (batch, features)
+    y_t, cache = model.step(x_t, cache)
+    outputs.append(y_t)
+
+# Stack outputs
+y_seq = torch.stack(outputs, dim=1)  # (batch, length, features)
+```
+
+### With Gating and Bottleneck (GSS-style)
+
+```python
+model = S4(
+    d_model=256,
+    d_state=64,
+    l_max=2048,
+    bottleneck=2,      # Reduce inner dimension by 2x
+    gate=2,            # Multiplicative gating with 2x expansion
+    channels=4,        # Use 4 independent SSM heads
+    dropout=0.1
+)
+```
+
+## Key Features
+
+### DPLR Parameterization
+
+S4 uses a Diagonal Plus Low-Rank (DPLR) parameterization:
+
+```
+A = Λ - PP^T
+```
+
+where:
+- Λ is a diagonal matrix (learnable complex eigenvalues)
+- P is a low-rank correction matrix (rank determined by `rank` parameter)
+
+This enables:
+- **Efficient computation** via the Woodbury identity
+- **Expressiveness** through low-rank corrections
+- **Stability** via careful initialization
+
+### FFT-Based Convolution
+
+For training, S4 computes the SSM convolution in the frequency domain using FFT:
+
+1. Compute convolution kernel K of length L
+2. Apply FFT to both kernel and input
+3. Multiply in frequency domain
+4. Apply inverse FFT
+
+This reduces complexity from O(L²) to O(L log L).
+
+### Conjugate Symmetry
+
+To ensure real-valued outputs from complex SSMs, S4 enforces conjugate symmetry in the state space, effectively halving the state dimension internally.
+
+## Notes
+
+- S4 uses `discretization="no_discretization"` as it handles discretization internally
+- The `rank` parameter controls the expressiveness of the DPLR parameterization
+- For long sequences, set `l_max` appropriately to pre-compute kernels
+- The model includes a learnable skip connection via the D parameter
+
+## See Also
+
+- [S4D API Reference](/api/lti/s4d) - Diagonal variant (simpler, no low-rank correction)
+- [S5 API Reference](/api/lti/s5) - Simplified S4 architecture
+- [LTI_LRNN Base Class](/api/lti/base) - Base class documentation
+- [LTI Concepts](/concepts/lti) - Understanding LTI models
+- [Original S4 Paper](https://arxiv.org/abs/2111.00396)

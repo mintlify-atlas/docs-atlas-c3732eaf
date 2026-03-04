@@ -1,0 +1,134 @@
+---
+title: Linear RNNs
+description: Understanding linear recurrent neural networks and why they matter for sequence modeling
+---
+
+## What are linear RNNs?
+
+Linear RNNs are a class of sequence models that combine the efficiency of recurrent architectures with the expressiveness needed for modern deep learning tasks. Unlike traditional RNNs, linear RNNs use structured state-space models (SSMs) that can be computed efficiently in both recurrent and convolutional forms.
+
+At their core, linear RNNs model sequences using a continuous-time state-space representation:
+
+```
+h'(t) = A h(t) + B x(t)
+y(t) = C h(t) + D x(t)
+```
+
+Where:
+- `h(t)` is the hidden state
+- `x(t)` is the input
+- `y(t)` is the output
+- `A`, `B`, `C`, `D` are learned parameter matrices
+
+These continuous-time equations are then discretized for use with digital sequences (see [Discretization](/concepts/discretization)).
+
+## Why linear RNNs matter
+
+Linear RNNs address fundamental challenges in sequence modeling:
+
+### Efficiency advantages
+
+<AccordionGroup>
+  <Accordion title="Training speed">
+    For Linear Time-Invariant (LTI) models, training can use FFT-based convolutions instead of sequential recurrence. This enables parallelization across the sequence length, making training as fast as Transformers.
+  </Accordion>
+
+  <Accordion title="Inference speed">
+    During inference, linear RNNs process sequences recurrently with a fixed-size state. This means constant memory usage and linear-time complexity, regardless of sequence length - a major advantage over Transformers' quadratic attention.
+  </Accordion>
+
+  <Accordion title="Long-range dependencies">
+    Through careful parameterization and initialization, linear RNNs can capture dependencies across thousands or even millions of timesteps without the vanishing gradient problems of traditional RNNs.
+  </Accordion>
+</AccordionGroup>
+
+### Comparison with other architectures
+
+| Feature | Linear RNNs | Traditional RNNs | Transformers |
+|---------|-------------|------------------|-------------|
+| Training parallelization | Yes (LTI models) | No | Yes |
+| Inference memory | O(1) | O(1) | O(L) |
+| Long-range modeling | Excellent | Poor | Good |
+| Computational cost | O(L) | O(L) | O(L²) |
+
+<Note>
+  The exact characteristics depend on whether you're using an LTI or LTV model. See [LTI vs LTV](/concepts/lti-vs-ltv) for details.
+</Note>
+
+## Key models in lrnnx
+
+The library implements several state-of-the-art linear RNN architectures:
+
+<CardGroup cols={2}>
+  <Card title="S4" icon="wave-square">
+    Structured State Space (S4) - the foundational model using diagonal plus low-rank (DPLR) parameterization for efficient long-range modeling.
+  </Card>
+
+  <Card title="S4D" icon="layer-group">
+    Diagonal State Space (S4D) - a simplified version of S4 using purely diagonal state matrices for improved efficiency.
+  </Card>
+
+  <Card title="S5" icon="cube">
+    Simplified State Space (S5) - a MIMO (multi-input multi-output) extension that processes all channels together.
+  </Card>
+
+  <Card title="LRU" icon="circle-dot">
+    Linear Recurrent Unit - uses complex-valued diagonal parameterization for stability and expressiveness.
+  </Card>
+
+  <Card title="Centaurus" icon="star">
+    A family of efficient variants combining different architectural patterns (depthwise separable, neck connections, etc.).
+  </Card>
+
+  <Card title="Mamba" icon="bolt">
+    Selective State Space Model - input-dependent dynamics (LTV) that adapts its behavior based on the input content.
+  </Card>
+
+  <Card title="S6 & S7" icon="arrows-rotate">
+    Extensions of S5 with selective (input-dependent) mechanisms for greater expressiveness.
+  </Card>
+
+  <Card title="RG-LRU" icon="lock">
+    Recurrent Gated LRU - adds gating mechanisms to the LRU architecture for improved selective processing.
+  </Card>
+</CardGroup>
+
+## Choosing a model
+
+<Tabs>
+  <Tab title="For fixed patterns">
+    **Use LTI models** (S4, S4D, S5, LRU, Centaurus) when:
+    - Your data has consistent temporal dynamics
+    - You want maximum training speed via FFT convolutions
+    - You need proven stability and long-range modeling
+    - Examples: audio processing, time series forecasting, genomics
+  </Tab>
+
+  <Tab title="For content-dependent processing">
+    **Use LTV models** (Mamba, S6, S7, RG-LRU) when:
+    - You need input-dependent selectivity
+    - Your task requires filtering or focusing on specific parts of the input
+    - You're working on language modeling or similar tasks
+    - Examples: language models, document understanding, selective copying tasks
+  </Tab>
+</Tabs>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="LTI vs LTV" icon="scale-balanced" href="/concepts/lti-vs-ltv">
+    Learn the key differences between Linear Time-Invariant and Linear Time-Varying models
+  </Card>
+
+  <Card title="Discretization" icon="clock" href="/concepts/discretization">
+    Understand how continuous-time models are converted to discrete-time for implementation
+  </Card>
+
+  <Card title="Model Reference" icon="book" href="/models/overview">
+    Explore detailed API documentation for each model
+  </Card>
+
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Start building with lrnnx models
+  </Card>
+</CardGroup>

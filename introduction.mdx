@@ -1,0 +1,313 @@
+---
+title: Lrnnx documentation
+description: A unified PyTorch library for Linear RNN architectures
+mode: custom
+---
+
+<div className="relative overflow-hidden bg-gradient-to-br from-[#5d6c75] via-[#4a5963] to-[#3d4952] dark:from-[#1a1d27] dark:via-[#242838] dark:to-[#0f1117] py-20">
+  <div className="max-w-7xl mx-auto px-6 lg:px-8">
+    <div className="lg:grid lg:grid-cols-12 lg:gap-8 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6">
+          Linear RNNs for PyTorch
+        </h1>
+        <p className="text-lg md:text-xl text-white/90 max-w-2xl mb-8">
+          A unified library providing state-of-the-art Linear RNN architectures including S4, S5, LRU, Mamba, and more — optimized for sequence modeling with custom CUDA kernels.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-white text-[#5d6c75] font-semibold hover:bg-white/90 transition-colors no-underline"
+          >
+            Get started
+          </a>
+          <a 
+            href="/models/overview" 
+            className="inline-flex items-center px-6 py-3 rounded-lg border border-white/30 bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors no-underline"
+          >
+            Explore models
+          </a>
+        </div>
+      </div>
+      <div className="hidden lg:block lg:col-span-5">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-r from-[#5d6c75]/20 to-transparent rounded-lg"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Quick start
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Get up and running with lrnnx in minutes
+  </p>
+
+  <Steps>
+    <Step title="Install the library">
+      Install lrnnx from PyPI. We recommend installing PyTorch first to match your CUDA version.
+      
+      <CodeGroup>
+      ```bash pip
+      pip install lrnnx
+      ```
+      
+      ```bash uv
+      uv add lrnnx
+      ```
+      
+      ```bash pip (with causal-conv1d)
+      pip install "lrnnx[conv1d]"
+      ```
+      </CodeGroup>
+      
+      <Note>
+        Installation includes compiling custom CUDA kernels, which may take up to 30 minutes depending on your system.
+      </Note>
+    </Step>
+
+    <Step title="Import and instantiate a model">
+      Choose from Linear Time-Invariant (LTI) or Linear Time-Varying (LTV) models.
+      
+      ```python
+      from lrnnx.models.lti import LRU
+      from lrnnx.models.ltv import Mamba
+      import torch
+      
+      # LTI model example
+      model_lti = LRU(d_model=64, d_state=64).cuda()
+      
+      # LTV model example
+      model_ltv = Mamba(d_model=64, d_state=16).cuda()
+      ```
+    </Step>
+
+    <Step title="Run a forward pass">
+      Process sequences with your model in training or inference mode.
+      
+      ```python
+      # Create sample input
+      batch_size, seq_len, d_model = 2, 128, 64
+      x = torch.randn(batch_size, seq_len, d_model, dtype=torch.float32, device="cuda")
+      
+      # Forward pass
+      output = model_lti(x)
+      print(output.shape)  # torch.Size([2, 128, 64])
+      ```
+      
+      <Tip>
+        For autoregressive inference, use the optimized CUDA graphs-based generation API for 10x speedup. See the [inference guide](/guides/inference).
+      </Tip>
+    </Step>
+  </Steps>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Explore by model type
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Choose the architecture that fits your use case
+  </p>
+
+  <CardGroup cols={2}>
+    <Card title="Linear Time-Invariant (LTI)" icon="function" href="/concepts/lti-vs-ltv">
+      Models with fixed dynamics: S4, S4D, S5, LRU, and Centaurus. Efficient for long sequences with stable patterns.
+    </Card>
+    <Card title="Linear Time-Varying (LTV)" icon="waveform" href="/concepts/lti-vs-ltv">
+      Models with input-dependent dynamics: Mamba, S6, S7, RG-LRU, STREAM. Adaptive for complex temporal dependencies.
+    </Card>
+    <Card title="Language models" icon="message-lines" href="/architectures/language-model">
+      Pre-built architectures for autoregressive language modeling with replaceable LRNN and attention layers.
+    </Card>
+    <Card title="U-Net and classifiers" icon="sitemap" href="/architectures/unet">
+      Domain-specific architectures for audio denoising, hierarchical classification, and sequence-to-sequence tasks.
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Key features
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Everything you need for modern sequence modeling
+  </p>
+
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-[#5d6c75] dark:text-[#b5bec1] mb-4">
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        10+ architectures
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Unified implementations of S4, S4D, S5, LRU, Centaurus, Mamba, RG-LRU, S7, and more.
+      </p>
+    </div>
+
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-[#5d6c75] dark:text-[#b5bec1] mb-4">
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        Custom CUDA kernels
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Optimized forward and backward kernels for selective scan, simplified scan, and S4 operations.
+      </p>
+    </div>
+
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-[#5d6c75] dark:text-[#b5bec1] mb-4">
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        Multiple API levels
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Access scan operations, recurrent steps, or full layer implementations matching the original papers.
+      </p>
+    </div>
+
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-[#5d6c75] dark:text-[#b5bec1] mb-4">
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        Fast inference
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        CUDA graphs-based autoregressive generation with 10x speedup over naive implementations.
+      </p>
+    </div>
+
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-[#5d6c75] dark:text-[#b5bec1] mb-4">
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        Pre-built architectures
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Language models, U-Nets, and hierarchical classifiers ready to use out of the box.
+      </p>
+    </div>
+
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-[#5d6c75] dark:text-[#b5bec1] mb-4">
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        Research-backed
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Accepted to EACL 2026 Student Research Workshop with comprehensive benchmarks and evaluation.
+      </p>
+    </div>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Resources
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Learn more about lrnnx and Linear RNNs
+  </p>
+
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <a href="https://arxiv.org/abs/2602.08810" className="group block p-6 rounded-lg border border-gray-200 dark:border-[#27272a] hover:border-[#5d6c75] dark:hover:border-[#b5bec1] bg-white dark:bg-[#1a1d27] transition-colors no-underline">
+      <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2 group-hover:text-[#5d6c75] dark:group-hover:text-[#b5bec1]">
+        Technical report
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+        Read the EACL 2026 paper describing lrnnx's architecture, benchmarks, and design decisions.
+      </p>
+      <span className="text-sm text-[#5d6c75] dark:text-[#b5bec1] group-hover:underline inline-flex items-center">
+        Read on arXiv
+        <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </span>
+    </a>
+
+    <a href="https://github.com/SforAiDl/lrnnx" className="group block p-6 rounded-lg border border-gray-200 dark:border-[#27272a] hover:border-[#5d6c75] dark:hover:border-[#b5bec1] bg-white dark:bg-[#1a1d27] transition-colors no-underline">
+      <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2 group-hover:text-[#5d6c75] dark:group-hover:text-[#b5bec1]">
+        GitHub repository
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+        View the source code, report issues, and contribute to the project.
+      </p>
+      <span className="text-sm text-[#5d6c75] dark:text-[#b5bec1] group-hover:underline inline-flex items-center">
+        View on GitHub
+        <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </span>
+    </a>
+
+    <a href="/tutorials/unet-denoising" className="group block p-6 rounded-lg border border-gray-200 dark:border-[#27272a] hover:border-[#5d6c75] dark:hover:border-[#b5bec1] bg-white dark:bg-[#1a1d27] transition-colors no-underline">
+      <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2 group-hover:text-[#5d6c75] dark:group-hover:text-[#b5bec1]">
+        Tutorials
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+        Step-by-step guides for audio denoising with U-Net and hierarchical classification.
+      </p>
+      <span className="text-sm text-[#5d6c75] dark:text-[#b5bec1] group-hover:underline inline-flex items-center">
+        Browse tutorials
+        <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </span>
+    </a>
+
+    <a href="/guides/custom-kernels" className="group block p-6 rounded-lg border border-gray-200 dark:border-[#27272a] hover:border-[#5d6c75] dark:hover:border-[#b5bec1] bg-white dark:bg-[#1a1d27] transition-colors no-underline">
+      <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2 group-hover:text-[#5d6c75] dark:group-hover:text-[#b5bec1]">
+        Custom kernels
+      </h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+        Learn about the optimized CUDA kernels that power lrnnx's performance.
+      </p>
+      <span className="text-sm text-[#5d6c75] dark:text-[#b5bec1] group-hover:underline inline-flex items-center">
+        Explore kernels
+        <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </span>
+    </a>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="p-8 md:p-12 rounded-2xl bg-gradient-to-br from-[#5d6c75] to-[#4a5963] dark:from-[#242838] dark:to-[#1a1d27] border border-[#5d6c75]/20 dark:border-[#b5bec1]/20">
+    <h2 className="text-2xl md:text-3xl font-semibold text-white mb-4">
+      Ready to get started?
+    </h2>
+    <p className="text-base text-white/90 mb-6 max-w-2xl">
+      Install lrnnx and start building with state-of-the-art Linear RNN architectures. Check out the quickstart guide to run your first model in minutes.
+    </p>
+    <a 
+      href="/quickstart" 
+      className="inline-flex items-center px-6 py-3 rounded-lg bg-white text-[#5d6c75] font-semibold hover:bg-white/90 transition-colors no-underline"
+    >
+      View quickstart guide
+    </a>
+  </div>
+</div>

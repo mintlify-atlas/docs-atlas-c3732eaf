@@ -1,0 +1,507 @@
+---
+title: Discretization methods
+description: Converting continuous-time state-space models to discrete-time for implementation
+---
+
+## Why discretization?
+
+Linear RNNs are based on continuous-time state-space models:
+
+```
+h'(t) = A h(t) + B x(t)
+y(t) = C h(t) + D x(t)
+```
+
+However, neural networks operate on discrete sequences (text tokens, audio samples, video frames). **Discretization** is the process of converting these continuous-time equations into discrete-time recurrence relations that can be computed on digital hardware:
+
+```python
+# After discretization
+h[k+1] = A_bar @ h[k] + B_bar @ x[k]
+y[k] = C @ h[k] + D @ x[k]
+```
+
+Where `A_bar` and `B_bar` are the discretized matrices obtained from continuous-time `A` and `B`.
+
+<Info>
+  The discretization method you choose affects the model's stability, accuracy, and how it handles different temporal patterns.
+</Info>
+
+## Available methods
+
+lrnnx implements several discretization methods from the literature. Each has different properties and use cases:
+
+<CardGroup cols={3}>
+  <Card title="Zero-Order Hold" icon="stairs">
+    Most common - assumes input is constant between timesteps
+  </Card>
+
+  <Card title="Bilinear" icon="wave-sine">
+    Original S4 method - trapezoidal approximation
+  </Card>
+
+  <Card title="Dirac" icon="circle-dot">
+    For event-based data - treats inputs as impulses
+  </Card>
+</CardGroup>
+
+## Zero-Order Hold (ZOH)
+
+### Mathematical formulation
+
+ZOH is the most widely used discretization method in modern linear RNNs. It assumes the input signal is piecewise constant (held) between timesteps:
+
+```math
+\bar{A} = \exp(\Delta A)
+```
+```math
+\bar{\gamma} = A^{-1} (\bar{A} - I)
+```
+
+Where `Δ` is the discretization step size (learned or fixed), and `γ_bar` is used to compute `B_bar = γ_bar * B`.
+
+### Implementation
+
+From `lrnnx/core/discretization.py`:
+
+```python
+def zoh(
+    A: Tensor, delta: Tensor, integration_timesteps: Optional[Tensor] = None
+) -> tuple[Tensor, Tensor]:
+    """
+    Zero-Order Hold (ZOH) discretization method, used across most models.
+
+    Args:
+        A (torch.Tensor): The continuous-time state matrix.
+        delta (torch.Tensor): The discretization step size.
+        integration_timesteps (torch.Tensor, optional): Not used in ZOH.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: A tuple containing:
+            - A_bar : The discretized system matrix.
+            - gamma_bar : The input normalizer.
+    """
+    Identity = torch.ones(A.shape[0], device=A.device)
+    A_bar = torch.exp(delta * A)
+    gamma_bar = (1 / A) * (A_bar - Identity)
+    return A_bar, gamma_bar
+```
+
+### Usage
+
+<Tabs>
+  <Tab title="LTI Model">
+    ```python
+    from lrnnx.models.lti import S4
+
+    # ZOH is the default for most models
+    model = S4(
+        d_model=64,
+        d_state=64,
+        l_max=1024,
+        discretization="zoh"  # Explicitly specify
+    )
+
+    x = torch.randn(2, 1024, 64)
+    y = model(x)
+    ```
+  </Tab>
+
+  <Tab title="LTV Model">
+    ```python
+    from lrnnx.models.ltv import Mamba
+
+    # ZOH also works for LTV models
+    model = Mamba(
+        d_model=64,
+        d_state=16,
+        d_conv=4,
+        discretization="zoh"
+    )
+
+    x = torch.randn(2, 1024, 64)
+    y = model(x)
+    ```
+  </Tab>
+</Tabs>
+
+### When to use ZOH
+
+<AccordionGroup>
+  <Accordion title="Default choice">
+    ZOH is the recommended default for most applications. It's used in:
+    - S4D, S5 (both LTI and LTV variants)
+    - LRU
+    - Mamba (default)
+    - Most modern linear RNN papers
+  </Accordion>
+
+  <Accordion title="Sampled continuous signals">
+    Ideal when your discrete sequence comes from sampling a continuous signal:
+    - Audio (sampling continuous sound waves)
+    - Time series (sampling continuous measurements)
+    - Video (sampling continuous visual scenes)
+  </Accordion>
+</AccordionGroup>
+
+## Bilinear method
+
+### Mathematical formulation
+
+The bilinear method (also called Tustin's method or trapezoidal rule) was the original discretization used in S4:
+
+```math
+\bar{A} = (I + 0.5 \Delta A)^{-1} (I - 0.5 \Delta A)
+```
+```math
+\bar{\gamma} = (I + 0.5 \Delta A)^{-1} \Delta
+```
+
+### Implementation
+
+From `lrnnx/core/discretization.py`:
+
+```python
+def bilinear(
+    A: Tensor, delta: Tensor, integration_timesteps: Optional[Tensor] = None
+) -> tuple[Tensor, Tensor]:
+    """
+    Bilinear method first used in S4.
+
+    Args:
+        A (torch.Tensor): Continuous-time system matrix (diagonal elements only).
+        delta (torch.Tensor): Time step for discretization.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: A tuple containing:
+            - A_bar : The discretized system matrix.
+            - gamma_bar : The input normalizer.
+    """
+    Identity = torch.ones(A.shape[0], device=A.device)
+    A_bar = (1 / (Identity + 0.5 * delta * A)) * (Identity - 0.5 * delta * A)
+    gamma_bar = (1 / (Identity + 0.5 * delta * A)) * delta
+    return A_bar, gamma_bar
+```
+
+### Usage
+
+```python
+from lrnnx.models.lti import S4
+
+# Use bilinear discretization (original S4 method)
+model = S4(
+    d_model=64,
+    d_state=64,
+    l_max=1024,
+    discretization="bilinear"
+)
+
+x = torch.randn(2, 1024, 64)
+y = model(x)
+```
+
+### When to use bilinear
+
+<AccordionGroup>
+  <Accordion title="Original S4 compatibility">
+    Use bilinear if you need to exactly reproduce results from the original S4 paper or checkpoints.
+  </Accordion>
+
+  <Accordion title="Numerical stability">
+    Bilinear can provide better stability properties for certain system matrices, though ZOH is generally preferred in modern implementations.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  Most modern implementations (including S4D, S5, Mamba) use ZOH by default as it tends to perform better empirically.
+</Note>
+
+## Dirac method
+
+### Mathematical formulation
+
+The Dirac method treats inputs as instantaneous impulses (Dirac delta functions) rather than sustained signals:
+
+```math
+\bar{A} = \exp(\Delta A)
+```
+```math
+\bar{\gamma} = 1.0
+```
+
+Note that `γ_bar = 1.0` (constant), unlike ZOH where it depends on `A`.
+
+### Implementation
+
+From `lrnnx/core/discretization.py`:
+
+```python
+def dirac(
+    A: Tensor, delta: Tensor, integration_timesteps: Optional[Tensor] = None
+) -> tuple[Tensor, float]:
+    """
+    Dirac discretization method.
+
+    Reference: https://github.com/Efficient-Scalable-Machine-Learning/event-ssm
+
+    Args:
+        A (torch.Tensor): Continuous-time system matrix.
+        delta (torch.Tensor): Time step for discretization.
+
+    Returns:
+        tuple[torch.Tensor, float]: A tuple containing:
+            - A_bar : The discretized system matrix.
+            - gamma_bar : The input normalizer (1.0).
+    """
+    A_bar = torch.exp(delta * A)
+    gamma_bar = 1.0
+    return A_bar, gamma_bar
+```
+
+### Usage
+
+```python
+from lrnnx.models.lti import S5
+
+# Use Dirac discretization for event-based data
+model = S5(
+    d_model=64,
+    d_state=64,
+    discretization="dirac"
+)
+
+x = torch.randn(2, 1024, 64)
+y = model(x)
+```
+
+### When to use Dirac
+
+<AccordionGroup>
+  <Accordion title="Event-based processing">
+    Dirac discretization is designed for event-based data where inputs represent discrete events rather than continuous signals:
+    - Neuromorphic spike trains
+    - Event cameras (DVS sensors)
+    - Point process data
+  </Accordion>
+
+  <Accordion title="Impulse responses">
+    Use when modeling systems that respond to instantaneous inputs rather than sustained signals.
+  </Accordion>
+</AccordionGroup>
+
+## Asynchronous discretization
+
+### Mathematical formulation
+
+Asynchronous discretization allows different timesteps at each sequence position, useful for irregular event streams:
+
+```math
+\bar{A}[t] = \exp(\Delta \cdot \text{timesteps}[t] \cdot A)
+```
+```math
+\bar{\gamma}[t] = A^{-1} (\exp(\Delta \cdot A) - I)
+```
+
+<Warning>
+  Asynchronous discretization is only supported for **LTV models**. LTI models cannot use this method because it creates time-varying dynamics.
+</Warning>
+
+### Implementation
+
+From `lrnnx/core/discretization.py`:
+
+```python
+def async_(
+    A: Tensor, delta: Tensor, integration_timesteps: Optional[Tensor] = None
+) -> tuple[Tensor, Tensor]:
+    """
+    Asynchronous discretization method.
+
+    This method is only applicable for LTV models.
+
+    Args:
+        A (torch.Tensor): Continuous-time system matrix.
+        delta (torch.Tensor): Time step for discretization.
+        integration_timesteps (torch.Tensor): Timesteps for async discretization,
+            shape (B, L), representing time differences between events.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: Discretized matrices.
+    """
+    assert (
+        integration_timesteps is not None
+    ), "Integration timesteps must be provided for async discretization."
+    Identity = torch.ones(A.shape[0], device=A.device)
+    A_bar = torch.exp(delta * integration_timesteps * A)
+    gamma_bar = (1 / A) * (A_bar - Identity)
+
+    return A_bar, gamma_bar
+```
+
+### Usage
+
+```python
+from lrnnx.models.ltv import Mamba
+
+# Create model with async discretization
+model = Mamba(
+    d_model=64,
+    d_state=16,
+    d_conv=4,
+    discretization="async"
+)
+
+# Provide timesteps (e.g., time differences between events)
+x = torch.randn(2, 1024, 64)
+timesteps = torch.abs(torch.randn(2, 1024))  # Variable time deltas
+
+# Pass timesteps to forward
+y = model(x, integration_timesteps=timesteps)
+```
+
+### When to use async
+
+<AccordionGroup>
+  <Accordion title="Irregular time series">
+    When your data has non-uniform sampling intervals:
+    - Medical records with irregular timestamps
+    - Financial tick data
+    - Sensor networks with asynchronous reporting
+  </Accordion>
+
+  <Accordion title="Event-based sensors">
+    Neuromorphic event cameras and other asynchronous sensors where events occur at irregular intervals.
+  </Accordion>
+</AccordionGroup>
+
+## Model compatibility
+
+Different models support different discretization methods:
+
+<Tabs>
+  <Tab title="LTI Models">
+    | Model | zoh | bilinear | dirac | async |
+    |-------|-----|----------|-------|-------|
+    | S4 | ✓ | ✓ | ✓ | ✗ |
+    | S4D | ✓ | ✓ | ✓ | ✗ |
+    | S5 | ✓ | ✓ | ✓ | ✗ |
+    | LRU | ✓ | ✓ | ✓ | ✗ |
+    | Centaurus | ✓ | ✓ | ✓ | ✗ |
+
+    <Note>
+      LTI models **cannot use async** discretization because it creates time-varying dynamics.
+    </Note>
+  </Tab>
+
+  <Tab title="LTV Models">
+    | Model | zoh | bilinear | dirac | async |
+    |-------|-----|----------|-------|-------|
+    | Mamba | ✓ | ✓ | ✓ | ✓ |
+    | S6 | ✓ | ✓ | ✓ | ✓ |
+    | S7 | ✓ | ✓ | ✓ | ✓ |
+    | RG-LRU | ✓ | ✓ | ✓ | ✓ |
+
+    <Info>
+      LTV models support **all discretization methods** including async for event-based processing.
+    </Info>
+  </Tab>
+</Tabs>
+
+## Advanced: Custom discretization
+
+You can implement custom discretization methods by following the function signature:
+
+```python
+from typing import Optional, Tuple, Union
+import torch
+from torch import Tensor
+
+def my_custom_discretization(
+    A: Tensor,
+    delta: Tensor,
+    integration_timesteps: Optional[Tensor] = None
+) -> Tuple[Tensor, Union[Tensor, float]]:
+    """
+    Custom discretization method.
+
+    Args:
+        A: Continuous-time state matrix
+        delta: Discretization step size
+        integration_timesteps: Optional timesteps for async processing
+
+    Returns:
+        (A_bar, gamma_bar): Discretized matrices
+    """
+    # Your discretization logic here
+    A_bar = ...  # Compute discretized A
+    gamma_bar = ...  # Compute input normalizer
+    
+    return A_bar, gamma_bar
+```
+
+Then register it:
+
+```python
+from lrnnx.core.discretization import DISCRETIZE_FNS
+
+DISCRETIZE_FNS["my_custom"] = my_custom_discretization
+
+# Now you can use it
+from lrnnx.models.lti import S5
+model = S5(d_model=64, d_state=64, discretization="my_custom")
+```
+
+## Quick reference
+
+<CardGroup cols={2}>
+  <Card title="ZOH" icon="stairs">
+    **Default choice**
+    
+    Use for: Most applications, sampled continuous signals
+    
+    Models: All LTI and LTV models
+  </Card>
+
+  <Card title="Bilinear" icon="wave-sine">
+    **Original S4 method**
+    
+    Use for: S4 compatibility, specific stability requirements
+    
+    Models: All LTI and LTV models
+  </Card>
+
+  <Card title="Dirac" icon="circle-dot">
+    **Event-based**
+    
+    Use for: Neuromorphic data, event cameras, impulse responses
+    
+    Models: All LTI and LTV models
+  </Card>
+
+  <Card title="Async" icon="clock">
+    **Irregular timesteps**
+    
+    Use for: Asynchronous events, irregular time series
+    
+    Models: **LTV models only**
+  </Card>
+</CardGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Linear RNNs" icon="wave-square" href="/concepts/linear-rnns">
+    Learn the fundamentals of linear RNNs
+  </Card>
+
+  <Card title="LTI vs LTV" icon="scale-balanced" href="/concepts/lti-vs-ltv">
+    Understand when to use each model type
+  </Card>
+
+  <Card title="Model Reference" icon="book" href="/models/overview">
+    Detailed API documentation for all models
+  </Card>
+
+  <Card title="Examples" icon="code" href="/tutorials/unet-denoising">
+    See complete usage examples
+  </Card>
+</CardGroup>

@@ -1,0 +1,404 @@
+---
+title: S4 Kernel Operations
+description: S4 kernel operations for diagonal and low-rank state space models
+---
+
+## Overview
+
+The S4 kernel operations provide efficient convolution kernel computation for S4 (Structured State Space Sequence) models. These operations support both diagonal (S4D) and diagonal plus low-rank (DPLR) parameterizations of state space models.
+
+## S4Kernel
+
+```python
+from lrnnx.ops.s4_kernel_interface import S4Kernel
+```
+
+SSM kernel for diagonal + low rank (DPLR) state matrices. Computes pure convolution operations for efficient sequence modeling.
+
+<ParamField path="d_model" type="int" required>
+  Model dimension
+</ParamField>
+
+<ParamField path="l_max" type="int | None" required>
+  Maximum sequence length. If None, kernel length is determined dynamically
+</ParamField>
+
+<ParamField path="channels" type="int" required>
+  Number of output channels/heads
+</ParamField>
+
+<ParamField path="param_config" type="dict" required>
+  Configuration dictionary containing:
+  - Parameter references: `A_real`, `A_imag`, `B`, `C`, `inv_dt`, `P` (nn.Parameters owned by parent S4 model)
+  - Dimensions: `N`, `H`, `channels`, `rank`, `repeat`
+  - Flags: `dt_fast`, `real_transform`, `imag_transform`, `dt_transform`, `is_real`, `deterministic`, `verbose`
+</ParamField>
+
+### forward
+
+Compute SSM convolution kernel.
+
+<ParamField path="state" type="torch.Tensor" default="None">
+  State tensor to augment the kernel computation
+</ParamField>
+
+<ParamField path="rate" type="float" default="1.0">
+  Sampling rate for the kernel
+</ParamField>
+
+<ParamField path="L" type="int" default="None">
+  Sequence length. If None, uses `l_max / rate`
+</ParamField>
+
+<ResponseField name="k_B" type="torch.Tensor">
+  Convolution kernel of shape `(channels, H, L)`
+</ResponseField>
+
+<ResponseField name="k_state" type="torch.Tensor | None">
+  Kernel state if `state` was provided, otherwise None
+</ResponseField>
+
+### step
+
+Perform single recurrent step.
+
+<ParamField path="u" type="torch.Tensor" required>
+  Input tensor
+</ParamField>
+
+<ParamField path="state" type="torch.Tensor" required>
+  Current state tensor
+</ParamField>
+
+<ResponseField name="y" type="torch.Tensor">
+  Output tensor (real part)
+</ResponseField>
+
+<ResponseField name="new_state" type="torch.Tensor">
+  Updated state tensor
+</ResponseField>
+
+### default_state
+
+Create default zero-initialized state.
+
+<ParamField path="*batch_shape" type="tuple" required>
+  Variable length argument list for batch dimensions
+</ParamField>
+
+<ResponseField name="state" type="torch.Tensor">
+  Zero-initialized state tensor of shape `(*batch_shape, H, N)` or `(*batch_shape, H, 2*N)` depending on step mode
+</ResponseField>
+
+### Example
+
+```python
+import torch
+from lrnnx.ops.s4_kernel_interface import S4Kernel
+
+# Assume params are created by parent S4 model
+param_config = {
+    'A_real': A_real_param,
+    'A_imag': A_imag_param,
+    'B': B_param,
+    'C': C_param,
+    'P': P_param,
+    'inv_dt': inv_dt_param,
+    'N': 64,
+    'H': 256,
+    'channels': 1,
+    'rank': 2,
+    'repeat': 1,
+    'dt_fast': False,
+    'real_transform': 'exp',
+    'imag_transform': 'none',
+    'dt_transform': 'exp',
+    'is_real': False,
+    'deterministic': False,
+    'verbose': False
+}
+
+kernel = S4Kernel(
+    d_model=256,
+    l_max=1024,
+    channels=1,
+    param_config=param_config
+)
+
+# Compute convolution kernel
+k, _ = kernel(L=512)
+print(k.shape)  # (1, 256, 512)
+
+# Use for recurrent stepping
+kernel._setup_step(mode='linear')
+state = kernel.default_state(batch_size)
+u = torch.randn(batch_size, H, device='cuda')
+y, new_state = kernel.step(u, state)
+```
+
+---
+
+## S4DKernel
+
+```python
+from lrnnx.ops.s4_kernel_interface import S4DKernel
+```
+
+SSM kernel using diagonal state matrix (S4D model). Simpler and more efficient than DPLR for many tasks.
+
+<ParamField path="d_model" type="int" required>
+  Model dimension
+</ParamField>
+
+<ParamField path="l_max" type="int | None" required>
+  Maximum sequence length
+</ParamField>
+
+<ParamField path="channels" type="int" required>
+  Number of output channels
+</ParamField>
+
+<ParamField path="param_config" type="dict" required>
+  Configuration dictionary with additional S4D-specific key:
+  - `disc`: Discretization method ("zoh" or "bilinear")
+</ParamField>
+
+### forward
+
+Compute SSM convolution kernel.
+
+<ParamField path="L" type="int" required>
+  Sequence length
+</ParamField>
+
+<ParamField path="state" type="torch.Tensor" default="None">
+  State tensor
+</ParamField>
+
+<ParamField path="rate" type="float" default="1.0">
+  Sampling rate
+</ParamField>
+
+<ResponseField name="K" type="torch.Tensor">
+  Convolution kernel of shape `(channels, H, L)`
+</ResponseField>
+
+<ResponseField name="K_state" type="torch.Tensor | None">
+  Kernel state if provided, otherwise None
+</ResponseField>
+
+### step
+
+Single step operation.
+
+<ParamField path="u" type="torch.Tensor" required>
+  Input tensor of shape `(B, H)`
+</ParamField>
+
+<ParamField path="state" type="torch.Tensor" required>
+  Current state tensor of shape `(B, H, N)`
+</ParamField>
+
+<ResponseField name="y" type="torch.Tensor">
+  Output tensor (scaled by 2 for conjugate symmetry)
+</ResponseField>
+
+<ResponseField name="next_state" type="torch.Tensor">
+  Updated state tensor
+</ResponseField>
+
+### Example
+
+```python
+import torch
+from lrnnx.ops.s4_kernel_interface import S4DKernel
+
+param_config = {
+    'A_real': A_real_param,
+    'A_imag': A_imag_param,
+    'B': B_param,
+    'C': C_param,
+    'inv_dt': inv_dt_param,
+    'N': 64,
+    'H': 256,
+    'channels': 1,
+    'rank': 1,
+    'repeat': 1,
+    'dt_fast': False,
+    'real_transform': 'exp',
+    'imag_transform': 'none',
+    'dt_transform': 'exp',
+    'is_real': False,
+    'deterministic': False,
+    'verbose': False,
+    'disc': 'zoh'  # S4D-specific
+}
+
+kernel = S4DKernel(
+    d_model=256,
+    l_max=1024,
+    channels=1,
+    param_config=param_config
+)
+
+# Compute convolution kernel
+K, _ = kernel(L=512)
+print(K.shape)  # (1, 256, 512)
+```
+
+---
+
+## Cauchy Operations
+
+```python
+from lrnnx.ops.s4_utils import get_cauchy_kernel
+```
+
+Returns the best available Cauchy multiplication function (CUDA extension, KeOps, or PyTorch fallback).
+
+<ResponseField name="cauchy_fn" type="callable">
+  Cauchy kernel function with signature `(v, z, w) -> torch.Tensor`
+</ResponseField>
+
+### cauchy_naive
+
+Naive PyTorch fallback for Cauchy matrix multiplication.
+
+<ParamField path="v" type="torch.Tensor" required>
+  Input tensor of shape `(..., N)`
+</ParamField>
+
+<ParamField path="z" type="torch.Tensor" required>
+  Evaluation points tensor of shape `(..., L)`
+</ParamField>
+
+<ParamField path="w" type="torch.Tensor" required>
+  Poles tensor of shape `(..., N)`
+</ParamField>
+
+<ResponseField name="output" type="torch.Tensor">
+  The sum `v/(z-w)` of shape `(..., L)`
+</ResponseField>
+
+### Example
+
+```python
+import torch
+from lrnnx.ops.s4_utils import get_cauchy_kernel
+
+cauchy_fn = get_cauchy_kernel()
+
+N, L = 64, 256
+v = torch.randn(N, dtype=torch.complex64, device='cuda')
+z = torch.randn(L, dtype=torch.complex64, device='cuda')
+w = torch.randn(N, dtype=torch.complex64, device='cuda')
+
+result = cauchy_fn(v, z, w)
+print(result.shape)  # (256,)
+```
+
+---
+
+## Vandermonde Operations
+
+```python
+from lrnnx.ops.s4_utils import get_vandermonde_kernel, get_vandermonde_transpose_kernel
+```
+
+Returns the best available Vandermonde multiplication functions.
+
+### get_vandermonde_kernel
+
+<ResponseField name="vandermonde_fn" type="callable">
+  Vandermonde kernel function with signature `(v, x, L) -> torch.Tensor`
+</ResponseField>
+
+### log_vandermonde_naive
+
+Naive PyTorch fallback for log Vandermonde multiplication.
+
+<ParamField path="v" type="torch.Tensor" required>
+  Input tensor of shape `(..., N)`
+</ParamField>
+
+<ParamField path="x" type="torch.Tensor" required>
+  Log-space base tensor of shape `(..., N)`
+</ParamField>
+
+<ParamField path="L" type="int" required>
+  Sequence length
+</ParamField>
+
+<ParamField path="conj" type="bool" default="True">
+  Whether to use conjugate symmetry
+</ParamField>
+
+<ResponseField name="output" type="torch.Tensor">
+  The sum `v * x^l` for `l in [0, L)`, shape `(..., L)`
+</ResponseField>
+
+### get_vandermonde_transpose_kernel
+
+<ResponseField name="vandermonde_transpose_fn" type="callable">
+  Transposed Vandermonde kernel with signature `(u, v, x, L) -> torch.Tensor`
+</ResponseField>
+
+### log_vandermonde_transpose_naive
+
+Naive PyTorch fallback for transposed log Vandermonde multiplication.
+
+<ParamField path="u" type="torch.Tensor" required>
+  Input tensor of shape `(..., L)`
+</ParamField>
+
+<ParamField path="v" type="torch.Tensor" required>
+  Input tensor of shape `(..., N)`
+</ParamField>
+
+<ParamField path="x" type="torch.Tensor" required>
+  Log-space base tensor of shape `(..., N)`
+</ParamField>
+
+<ParamField path="L" type="int" required>
+  Sequence length
+</ParamField>
+
+<ResponseField name="output" type="torch.Tensor">
+  Output tensor of shape `(..., N)`
+</ResponseField>
+
+### Example
+
+```python
+import torch
+from lrnnx.ops.s4_utils import get_vandermonde_kernel, get_vandermonde_transpose_kernel
+
+vandermonde_fn = get_vandermonde_kernel()
+vandermonde_T_fn = get_vandermonde_transpose_kernel()
+
+N, L = 64, 256
+v = torch.randn(N, dtype=torch.complex64, device='cuda')
+x = torch.randn(N, dtype=torch.complex64, device='cuda')
+
+# Forward Vandermonde
+result = vandermonde_fn(v, x, L)
+print(result.shape)  # (256,)
+
+# Transposed Vandermonde
+u = torch.randn(L, dtype=torch.complex64, device='cuda')
+result_T = vandermonde_T_fn(u, v, x, L)
+print(result_T.shape)  # (64,)
+```
+
+## Performance Notes
+
+- **CUDA Extension**: Provides fastest performance when available
+- **KeOps**: Falls back to KeOps for GPU acceleration if CUDA extension not available
+- **PyTorch Fallback**: Pure PyTorch implementation used when neither CUDA nor KeOps available
+
+The library automatically selects the best available implementation at runtime.
+
+## Source Code
+
+- Kernel Interface: `lrnnx/ops/s4_kernel_interface.py`
+- Utilities: `lrnnx/ops/s4_utils.py`
