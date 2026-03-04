@@ -83,7 +83,7 @@ Forward pass of the S5 SSM using FFT-based convolution.
 </ParamField>
 
 <ParamField path="lengths" type="torch.Tensor" default={null}>
-  Lengths of the input sequences, shape `(B,)`. TODO: Support bidirectional models.
+  Lengths of the input sequences, shape `(B,)`. Used for variable-length sequence handling.
 </ParamField>
 
 <ResponseField name="return" type="torch.Tensor">
